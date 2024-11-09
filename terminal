@@ -1,0 +1,3 @@
+mkdir -p src/{assets,components,screens,navigation,services,context,utils}
+touch src/App.js
+touch README.md 
