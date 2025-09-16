@@ -1,47 +1,23 @@
-import React, { useEffect, useState } from 'react';
-import { NavigationContainer } from '@react-navigation/native';
-import RootNavigator from './src/navigation/RootNavigator';
-import * as Font from 'expo-font';
-import { View, ActivityIndicator } from 'react-native';
-import { Ionicons, FontAwesome, MaterialIcons } from '@expo/vector-icons';
+// Import Firebase config first to ensure it's initialized
+import './src/config/firebase';
+
+import React from 'react';
+import { registerRootComponent } from 'expo';
 import { SavedPropertiesProvider } from './src/context/SavedPropertiesContext';
+import { PropertyProvider } from './src/context/PropertyContext';
+import { AuthProvider } from './src/context/AuthContext';
+import NavigationWrapper from './src/navigation/NavigationWrapper';
 
-const App = () => {
-  const [fontsLoaded, setFontsLoaded] = useState(false);
-
-  useEffect(() => {
-    async function loadFonts() {
-      try {
-        await Font.loadAsync({
-          ...Ionicons.font,
-          ...FontAwesome.font,
-          ...MaterialIcons.font,
-        });
-        setFontsLoaded(true);
-      } catch (error) {
-        console.error('Error loading fonts:', error);
-        // If fonts fail to load, we'll continue anyway
-        setFontsLoaded(true);
-      }
-    }
-    loadFonts();
-  }, []);
-
-  if (!fontsLoaded) {
-    return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-        <ActivityIndicator size="large" color="#fc565b" />
-      </View>
-    );
-  }
-
+function App() {
   return (
-    <SavedPropertiesProvider>
-      <NavigationContainer>
-        <RootNavigator />
-      </NavigationContainer>
-    </SavedPropertiesProvider>
+    <AuthProvider>
+      <PropertyProvider>
+        <SavedPropertiesProvider>
+          <NavigationWrapper />
+        </SavedPropertiesProvider>
+      </PropertyProvider>
+    </AuthProvider>
   );
-};
+}
 
-export default App; 
+export default registerRootComponent(App);

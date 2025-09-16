@@ -1,37 +1,67 @@
 {
   "expo": {
-    "name": "homerunn",
+    "name": "Homerunn",
     "slug": "homerunn",
+    "owner": "kadencrowther",
     "version": "1.0.0",
     "orientation": "portrait",
+    "icon": "./assets/homerunnapp.png",
     "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/homerunnapp.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
     "assetBundlePatterns": [
       "**/*"
     ],
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.homerunn.app",
-      "config": {
-        "googleMapsApiKey": "AIzaSyB8pepS2ZE0YL02JcfY20zZ_vDyTKP6DD4"
+      "buildNumber": "1.0.0",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "This app uses your location to find properties near you.",
+        "NSLocationAlwaysUsageDescription": "This app uses your location to find properties near you.",
+        "UIBackgroundModes": [
+          "location",
+          "fetch"
+        ]
       }
     },
     "android": {
-      "package": "com.homerunn.app",
       "adaptiveIcon": {
+        "foregroundImage": "./assets/homerunnapp.png",
         "backgroundColor": "#ffffff"
       },
-      "config": {
-        "googleMaps": {
-          "apiKey": "AIzaSyB8pepS2ZE0YL02JcfY20zZ_vDyTKP6DD4"
-        }
-      }
+      "package": "com.homerunn.app",
+      "versionCode": 1,
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION"
+      ]
     },
-    "sdkVersion": "51.0.0",
+    "web": {
+      "favicon": "./assets/homerunnapp.png"
+    },
+    "plugins": [
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Allow Homerunn to use your location to find properties near you."
+        }
+      ],
+      "expo-font",
+      "expo-apple-authentication"
+    ],
     "extra": {
       "eas": {
         "projectId": "c9d6dcde-524c-4058-b8d0-2ba7c32d1219"
       }
     },
-    "owner": "kadencrowther"
+    "runtimeVersion": "1.0.0",
+    "updates": {
+      "url": "https://u.expo.dev/c9d6dcde-524c-4058-b8d0-2ba7c32d1219"
+    },
+    "sdkVersion": "52.0.0"
   }
 }

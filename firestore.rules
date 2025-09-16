@@ -1,0 +1,180 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Allow users to create their own document during registration
+    match /AgentUsers/{userId} {
+      // Allow create if the user is authenticated and the userId matches their auth ID
+      allow create: if request.auth != null && request.auth.uid == userId;
+      
+      // Allow read for all authenticated users to find agents by zip code
+      allow read: if request.auth != null;
+      
+      // Allow update if the user is authenticated and the document belongs to them
+      allow update: if request.auth != null && request.auth.uid == userId;
+      
+      // Allow access to subcollections
+      match /Pipelines/{pipelineId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+    }
+    
+    // Add rules for AgentConnections collection
+    match /AgentConnections/{connectionId} {
+      // Allow authenticated users to create connections
+      allow create: if request.auth != null;
+      
+      // Allow users to read and update their own connections
+      allow read, update: if request.auth != null && 
+                          (resource.data.UserId == request.auth.uid || 
+                           resource.data.AgentId == request.auth.uid);
+      
+      // Only allow deletion by the user who created the connection
+      allow delete: if request.auth != null && resource.data.UserId == request.auth.uid;
+    }
+    
+    // Allow users to create their own document in the Users collection
+    match /Users/{userId} {
+      // Allow create if the user is authenticated and the userId matches their auth ID
+      allow create: if request.auth != null && request.auth.uid == userId;
+      
+      // Allow read if the user is authenticated and the document belongs to them
+      allow read: if request.auth != null && (
+        request.auth.uid == userId || 
+        resource.data.Role == 'Agent'  // Allow reading any agent user
+      );
+      
+      // Allow update if the user is authenticated and the document belongs to them
+      allow update: if request.auth != null && request.auth.uid == userId;
+      
+      // Allow access to Filters subcollection
+      match /Filters/{filterId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+      
+      // Add rules for UserMatchMetric subcollection
+      match /UserMatchMetric/{document=**} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+      
+      // Add rules for MatchMetrics subcollection (alternative name that might be used)
+      match /MatchMetrics/{document=**} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+      
+      // Add rules for MatchMetric (singular) subcollection
+      match /MatchMetric/{document=**} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+      
+      // Add rules for SwipeCount subcollection
+      match /SwipeCount/{document=**} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+      
+      // Add rules for any property-related subcollections
+      match /SavedProperties/{document=**} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+      
+      match /PropertyPreferences/{document=**} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+      
+      // Allow access to any other subcollection under Users/{userId}
+      match /{anyCollection}/{anyDocument} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+    }
+    
+    // Allow access to top-level UserMatchMetric collection if it exists
+    match /UserMatchMetric/{userId}/{document=**} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+    
+    // Allow access to top-level MatchMetric collection if it exists
+    match /MatchMetric/{userId}/{document=**} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+    
+    // Allow access to top-level SwipeCount collection if it exists
+    match /SwipeCount/{userId}/{document=**} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+    
+    // Allow access to Leads collection
+    match /Leads/{leadId} {
+      allow read, write: if request.auth != null;
+    }
+
+    // Allow public write access to Waitlist collection (PascalCase)
+    match /Waitlist/{document=**} {
+      // Allow anyone to create waitlist entries
+      allow create: if 
+        // Require all necessary fields
+        request.resource.data.keys().hasAll(['FirstName', 'Email', 'Phone', 'Type', 'Timestamp', 'Source']) &&
+        // Validate email format
+        request.resource.data.Email.matches('^[^@]+@[^@]+\\.[^@]+$') &&
+        // Validate phone number (basic validation)
+        request.resource.data.Phone.size() >= 10 &&
+        // Validate type is waitlist
+        request.resource.data.Type == 'waitlist';
+
+      // Only allow read access to authenticated users
+      allow read: if request.auth != null;
+    }
+
+    // Add or modify rules to allow access to UserMatchMetric subcollection
+    match /Users/{userId}/UserMatchMetric/{document=**} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+    
+    // Add explicit rule for SwipeCount subcollection
+    match /Users/{userId}/SwipeCount/{document=**} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // Add these rules to allow access to the Showings collection
+    match /Showings/{showingId} {
+      // Allow authenticated users to create showings
+      allow create: if request.auth != null;
+      
+      // Allow users to read their own showings
+      allow read: if request.auth != null && 
+                  (resource.data.UserId == request.auth.uid || 
+                   resource.data.AgentId == request.auth.uid);
+      
+      // Allow agents to update showings assigned to them
+      allow update: if request.auth != null && 
+                    (resource.data.UserId == request.auth.uid || 
+                     resource.data.AgentId == request.auth.uid);
+    }
+
+    // Add these rules to allow access to the Listings collection
+    match /Listings/{listingId} {
+      // Allow authenticated users to create listings
+      allow create: if request.auth != null;
+      
+      // Allow users to read and update their own listings
+      allow read, update: if request.auth != null && 
+                          (resource.data.UserId == request.auth.uid || 
+                           resource.data.AgentId == request.auth.uid);
+      
+      // Only allow deletion by the user who created the listing
+      allow delete: if request.auth != null && resource.data.UserId == request.auth.uid;
+    }
+
+    // Add rules for Prequalified collection
+    match /Prequalified/{prequalId} {
+      // Allow authenticated users to create prequalification requests
+      allow create: if request.auth != null;
+      
+      // Allow users to read and update their own prequalification requests
+      allow read, update: if request.auth != null && 
+                          resource.data.UserId == request.auth.uid;
+      
+      // Only allow deletion by the user who created the request
+      allow delete: if request.auth != null && resource.data.UserId == request.auth.uid;
+    }
+  }
+}

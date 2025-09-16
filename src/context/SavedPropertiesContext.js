@@ -1,6 +1,21 @@
 import React, { createContext, useState, useContext } from 'react';
 
-const SavedPropertiesContext = createContext();
+const defaultContext = {
+  savedProperties: [],
+  addToSaved: () => {},
+  removeFromSaved: () => {},
+  updateSavedProperty: () => {}
+};
+
+const SavedPropertiesContext = createContext(defaultContext);
+
+export function useSavedProperties() {
+  const context = useContext(SavedPropertiesContext);
+  if (!context) {
+    throw new Error('useSavedProperties must be used within a SavedPropertiesProvider');
+  }
+  return context;
+}
 
 export const SavedPropertiesProvider = ({ children }) => {
   const [savedProperties, setSavedProperties] = useState([]);
@@ -30,11 +45,16 @@ export const SavedPropertiesProvider = ({ children }) => {
     );
   };
 
+  const value = {
+    savedProperties,
+    addToSaved,
+    removeFromSaved,
+    updateSavedProperty
+  };
+
   return (
-    <SavedPropertiesContext.Provider value={{ savedProperties, addToSaved, removeFromSaved, updateSavedProperty }}>
+    <SavedPropertiesContext.Provider value={value}>
       {children}
     </SavedPropertiesContext.Provider>
   );
 };
-
-export const useSavedProperties = () => useContext(SavedPropertiesContext);

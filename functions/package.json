@@ -1,0 +1,16 @@
+{
+  "name": "functions",
+  "engines": {
+    "node": "20"
+  },
+  "scripts": {
+    "serve": "firebase emulators:start --only functions",
+    "deploy": "firebase deploy --only functions",
+    "start": "npm run serve"
+  },
+  "dependencies": {
+    "firebase-functions": "^4.7.0",
+    "firebase-admin": "^12.0.0",
+    "axios": "^1.6.7"
+  }
+}
