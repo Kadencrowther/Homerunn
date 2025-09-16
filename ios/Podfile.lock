@@ -229,19 +229,19 @@ PODS:
     - React-Core
   - ExpoAppleAuthentication (7.1.3):
     - ExpoModulesCore
-  - ExpoAsset (11.0.5):
+  - ExpoAsset (10.0.10):
     - ExpoModulesCore
-  - ExpoFileSystem (18.0.12):
+  - ExpoFileSystem (17.0.1):
     - ExpoModulesCore
   - ExpoFont (13.0.4):
     - ExpoModulesCore
-  - ExpoKeepAwake (14.0.3):
+  - ExpoKeepAwake (13.0.2):
     - ExpoModulesCore
   - ExpoLinking (7.0.5):
     - ExpoModulesCore
   - ExpoLocation (18.0.10):
     - ExpoModulesCore
-  - ExpoModulesCore (3.0.16):
+  - ExpoModulesCore (2.2.3):
     - DoubleConversion
     - glog
     - hermes-engine
@@ -256,6 +256,7 @@ PODS:
     - React-ImageManager
     - React-jsinspector
     - React-NativeModulesApple
+    - React-RCTAppDelegate
     - React-RCTFabric
     - React-rendererdebug
     - React-utils
@@ -2091,10 +2092,10 @@ DEPENDENCIES:
   - expo-dev-menu-interface (from `../node_modules/expo-dev-menu-interface/ios`)
   - "ExpoAdapterGoogleSignIn (from `../node_modules/@react-native-google-signin/google-signin/expo/ios`)"
   - ExpoAppleAuthentication (from `../node_modules/expo-apple-authentication/ios`)
-  - ExpoAsset (from `../node_modules/expo-asset/ios`)
-  - ExpoFileSystem (from `../node_modules/expo-file-system/ios`)
+  - ExpoAsset (from `../../../node_modules/expo-asset/ios`)
+  - ExpoFileSystem (from `../../../node_modules/expo-file-system/ios`)
   - ExpoFont (from `../node_modules/expo-font/ios`)
-  - ExpoKeepAwake (from `../node_modules/expo-keep-awake/ios`)
+  - ExpoKeepAwake (from `../../../node_modules/expo-keep-awake/ios`)
   - ExpoLinking (from `../node_modules/expo-linking/ios`)
   - ExpoLocation (from `../node_modules/expo-location/ios`)
   - ExpoModulesCore (from `../node_modules/expo-modules-core`)
@@ -2104,6 +2105,8 @@ DEPENDENCIES:
   - EXUpdatesInterface (from `../node_modules/expo-updates-interface/ios`)
   - fast_float (from `../node_modules/react-native/third-party-podspecs/fast_float.podspec`)
   - FBLazyVector (from `../node_modules/react-native/Libraries/FBLazyVector`)
+  - FirebaseAuth
+  - FirebaseCore
   - FirebaseCoreInternal
   - fmt (from `../node_modules/react-native/third-party-podspecs/fmt.podspec`)
   - glog (from `../node_modules/react-native/third-party-podspecs/glog.podspec`)
@@ -2224,13 +2227,13 @@ EXTERNAL SOURCES:
   ExpoAppleAuthentication:
     :path: "../node_modules/expo-apple-authentication/ios"
   ExpoAsset:
-    :path: "../node_modules/expo-asset/ios"
+    :path: "../../../node_modules/expo-asset/ios"
   ExpoFileSystem:
-    :path: "../node_modules/expo-file-system/ios"
+    :path: "../../../node_modules/expo-file-system/ios"
   ExpoFont:
     :path: "../node_modules/expo-font/ios"
   ExpoKeepAwake:
-    :path: "../node_modules/expo-keep-awake/ios"
+    :path: "../../../node_modules/expo-keep-awake/ios"
   ExpoLinking:
     :path: "../node_modules/expo-linking/ios"
   ExpoLocation:
@@ -2406,13 +2409,13 @@ SPEC CHECKSUMS:
   expo-dev-menu-interface: 00dc42302a72722fdecec3fa048de84a9133bcc4
   ExpoAdapterGoogleSignIn: 8b749750f4b43e884a89d5c5c8a64ae21854e84d
   ExpoAppleAuthentication: ee61704f441b3ef10a3d1280acbb6b9e2e04a38d
-  ExpoAsset: 0687fe05f5d051c4a34dd1f9440bd00858413cfe
-  ExpoFileSystem: c8c19bf80d914c83dda3beb8569d7fb603be0970
+  ExpoAsset: 323700f291684f110fb55f0d4022a3362ea9f875
+  ExpoFileSystem: 80bfe850b1f9922c16905822ecbf97acd711dc51
   ExpoFont: 773955186469acc5108ff569712a2d243857475f
-  ExpoKeepAwake: 2a5f15dd4964cba8002c9a36676319a3394c85c7
+  ExpoKeepAwake: 3b8815d9dd1d419ee474df004021c69fdd316d08
   ExpoLinking: 0381341519ca7180a3a057d20edb1cf6a908aaf4
   ExpoLocation: ad29273f84077363296657176ea39c3545521720
-  ExpoModulesCore: d2f3bf96f450b3040247059c20f8aa756e76b3db
+  ExpoModulesCore: c2eeb11b2fc321dfc21b892be14c124dcac0a1e8
   ExpoSplashScreen: 1832984021b0795fda9302cf84ac62f0490eeadd
   EXStructuredHeaders: 09c70347b282e3d2507e25fb4c747b1b885f87f6
   EXUpdates: b47cfddf12ef9edb0966b793349f6013b90f8fd4
@@ -2503,6 +2506,6 @@ SPEC CHECKSUMS:
   SocketRocket: d4aabe649be1e368d1318fdf28a022d714d65748
   Yoga: feb4910aba9742cfedc059e2b2902e22ffe9954a
 
-PODFILE CHECKSUM: d82616789f753e522d1d78cfeb6433a60d053182
+PODFILE CHECKSUM: 7a7742c4b25235838421f142c820a6301624ccc6
 
 COCOAPODS: 1.16.2
