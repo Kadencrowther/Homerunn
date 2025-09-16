@@ -9,20 +9,24 @@
       "distribution": "internal",
       "ios": {
         "simulator": false,
-        "prebuildCommand": "cd ios && pod repo update && pod install --repo-update && cd .. && ./fix-rct-folly.sh"
+        "image": "latest",
+        "buildConfiguration": "Debug",
+        "prebuildCommand": "cd ios && pod repo update && pod install --repo-update"
       }
     },
     "preview": {
       "distribution": "internal",
       "ios": {
-        "prebuildCommand": "cd ios && pod repo update && pod install --repo-update && cd .. && ./fix-rct-folly.sh"
+        "image": "latest",
+        "buildConfiguration": "Release",
+        "prebuildCommand": "cd ios && pod repo update && pod install --repo-update"
       }
     },
     "production": {
       "ios": {
         "image": "latest",
         "buildConfiguration": "Release",
-        "prebuildCommand": "cd ios && pod repo update && pod install --repo-update && cd .. && ./fix-rct-folly.sh"
+        "prebuildCommand": "cd ios && pod repo update && pod install --repo-update"
       }
     }
   }
