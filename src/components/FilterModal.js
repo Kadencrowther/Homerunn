@@ -13,16 +13,17 @@ import {
   Alert,
   Platform,
   ActivityIndicator,
+  Slider,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { db, auth } from '../config/firebase';
 import { collection, getDocs, query, where, orderBy, doc, setDoc, deleteDoc, Timestamp, writeBatch, getDoc } from 'firebase/firestore';
 import { toPascalCase } from '../utils/stringUtils';
 import MapView, { Circle, Marker } from 'react-native-maps';
-import Slider from '@react-native-community/slider';
 import * as Location from 'expo-location';
 
 const { width, height } = Dimensions.get('window');
+// Fixed slider import
 
 const FilterModal = ({ visible, onClose, onApply, onClear, currentFilters, screen }) => {
   // onClear is kept for backward compatibility but not used anymore

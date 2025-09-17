@@ -1,5 +1,5 @@
 import React from 'react';
-import { createStackNavigator } from '@react-navigation/stack';
+import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import WelcomeScreen from '../screens/WelcomScreen';
 import AccountCreationScreen from '../screens/AccountCreationScreen';
 import LoginScreen from '../screens/LoginScreen';
@@ -20,7 +20,7 @@ import HomeScreen from '../screens/HomeScreen';
 // Import the flag from SplashScreen
 import { splashHasRun } from '../screens/SplashScreen';
 
-const Stack = createStackNavigator();
+const Stack = createNativeStackNavigator();
 
 // Custom animation for splash to welcome transition
 const splashToWelcomeTransition = {

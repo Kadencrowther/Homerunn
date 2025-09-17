@@ -11,9 +11,9 @@ import {
   TouchableWithoutFeedback,
   ActivityIndicator,
   FlatList,
-  Vibration
+  Vibration,
+  Slider
 } from 'react-native';
-import Slider from '@react-native-community/slider';
 import { Ionicons } from '@expo/vector-icons';
 import Animated, { 
   useSharedValue, 

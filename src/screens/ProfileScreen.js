@@ -1,11 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Modal, TextInput, Animated, SafeAreaView, ScrollView, KeyboardAvoidingView, Platform, Linking, Switch, Dimensions, Alert, ActivityIndicator, FlatList } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Modal, TextInput, Animated, SafeAreaView, ScrollView, KeyboardAvoidingView, Platform, Linking, Switch, Dimensions, Alert, ActivityIndicator, FlatList, Slider } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { auth, db } from '../config/firebase';
 import { signOut, updateEmail, updatePassword, verifyBeforeUpdateEmail, EmailAuthProvider, reauthenticateWithCredential } from 'firebase/auth';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { LinearGradient } from 'expo-linear-gradient';
-import Slider from '@react-native-community/slider';
 import MapView, { Circle, Marker } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { initializeUserMatchMetric } from '../utils/UserMatchMetric';
