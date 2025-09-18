@@ -1,8 +1,7 @@
-const { getDefaultConfig } = require('expo/metro-config');
+const { getDefaultConfig } = require('@expo/metro-config');
 
-const config = getDefaultConfig(__dirname);
-
-// Add this configuration for asset handling
-config.resolver.assetExts.push('png', 'jpg', 'jpeg', 'gif', 'ttf');
-
-module.exports = config; 
+module.exports = (() => {
+  const config = getDefaultConfig(__dirname);
+  // Add any custom config here
+  return config;
+})(); 

@@ -1,37 +1,15 @@
 {
   "expo": {
-    "name": "homerunn",
-    "slug": "homerunn",
-    "version": "1.0.0",
-    "orientation": "portrait",
-    "userInterfaceStyle": "light",
-    "assetBundlePatterns": [
-      "**/*"
-    ],
-    "ios": {
-      "supportsTablet": true,
-      "bundleIdentifier": "com.homerunn.app",
-      "config": {
-        "googleMapsApiKey": "AIzaSyB8pepS2ZE0YL02JcfY20zZ_vDyTKP6DD4"
-      }
-    },
-    "android": {
-      "package": "com.homerunn.app",
-      "adaptiveIcon": {
-        "backgroundColor": "#ffffff"
-      },
-      "config": {
-        "googleMaps": {
-          "apiKey": "AIzaSyB8pepS2ZE0YL02JcfY20zZ_vDyTKP6DD4"
-        }
-      }
-    },
-    "sdkVersion": "51.0.0",
     "extra": {
       "eas": {
         "projectId": "c9d6dcde-524c-4058-b8d0-2ba7c32d1219"
       }
     },
-    "owner": "kadencrowther"
+    "ios": {
+      "bundleIdentifier": "com.kadencrowther.homerunn",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    }
   }
 }

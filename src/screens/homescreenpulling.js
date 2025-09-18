@@ -1,0 +1,1950 @@
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { 
+  View, Text, StyleSheet, Image, TouchableOpacity, 
+  Animated, Dimensions, Vibration, Platform, StatusBar, ScrollView, ActivityIndicator 
+} from 'react-native';
+import Swiper from 'react-native-deck-swiper';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { FontAwesome } from '@expo/vector-icons';
+import { useNavigation } from '@react-navigation/native';
+import FilterModal from '../components/FilterModal';
+import { useSavedProperties } from '../context/SavedPropertiesContext';
+import { formatPrice } from '../utils/formatters';
+import SwipeTutorial from '../components/SwipeTutorial';
+import { auth, db } from '../config/firebase';
+import { doc, setDoc, getDoc, collection, getDocs, query, where } from 'firebase/firestore';
+import { fetchMLSData, fetchMoreMLSData } from '../api/fetchMLSData';
+import ShimmerEffect from '../components/ShimmerEffect';
+import ShimmerCards from '../components/ShimmerCards';
+import LoadingCards from '../components/LoadingCards';
+import { getUserMatchMetric, updateUserMatchMetric, processPropertiesForUser, sortPropertiesByMatchScore, calculateMatchScore, getUserSwipeCount } from '../utils/UserMatchMetric';
+import { getPropertyMatchMetric } from '../utils/PropertyMatchMetric';
+
+// Screen dimensions
+const { width, height } = Dimensions.get('window');
+
+// Layout constants for the Swiper cards
+const HEADER_HEIGHT = Platform.OS === 'ios' ? 90 : (StatusBar.currentHeight + 60);
+const TAB_BAR_HEIGHT = Platform.OS === 'ios' ? 83 : 60;
+const CARD_MARGIN = 10;
+const BOTTOM_PADDING = 25;
+const CARD_HEIGHT = height - HEADER_HEIGHT - TAB_BAR_HEIGHT - (CARD_MARGIN * 2) - BOTTOM_PADDING;
+
+const HomeScreen = () => {
+  const navigation = useNavigation();
+
+  // Add this function to determine badge color based on status
+  const getStatusColor = (status) => {
+    if (status === 'Active') return '#fc565b';
+    if (status === 'Pending') return '#FFA500';
+    if (status === 'Sold' || status === 'Closed') return '#4CAF50';
+    return '#888888'; // Default gray for other statuses
+  };
+
+  // 1) Manage MLS data
+  const [allListings, setAllListings] = useState([]);    // Entire set from Cloud Function
+  const [currentDeck, setCurrentDeck] = useState([]);      // Currently displayed deck (filtered)
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Add state for pagination
+  const [paginationInfo, setPaginationInfo] = useState({
+    hasMoreProperties: false,
+    nextPageToken: null,
+    currentPage: 1,
+    totalFetched: 0
+  });
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [currentFilters, setCurrentFilters] = useState(null);
+
+  // 2) Other states & logic
+  const [overlayOpacity] = useState(new Animated.Value(0));
+  const [showHeartOverlay, setShowHeartOverlay] = useState(false);
+  const heartScale = useState(new Animated.Value(0))[0];
+  const [particles] = useState([...Array(8)].map(() => new Animated.ValueXY({ x: 0, y: 0 })));
+  const [overlayIcon, setOverlayIcon] = useState(null);
+  const [swipedCards, setSwipedCards] = useState([]);
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const { addToSaved, removeFromSaved } = useSavedProperties();
+
+  const [isFilterModalVisible, setIsFilterModalVisible] = useState(false);
+  const [filters, setFilters] = useState({
+    screen: 'home',
+    priceRange: { min: 0, max: 2000000 },
+    beds: [],
+    baths: [],
+    sqft: { min: 0, max: 10000 },
+    yearBuilt: { min: 1900, max: 2024 },
+    homeType: [],
+    hasBeenSet: false
+  });
+
+  // Only one declaration for showTutorial and hasInteracted
+  const [showTutorial, setShowTutorial] = useState(false);
+  const [hasInteracted, setHasInteracted] = useState(false);
+
+  // First, add a state to track if filters have been applied
+  const [filtersApplied, setFiltersApplied] = useState(false);
+
+  // Add state variables for user match metrics
+  const [userMatchMetric, setUserMatchMetric] = useState(null);
+  const [dislikedProperties, setDislikedProperties] = useState([]);
+  const [likedProperties, setLikedProperties] = useState([]);
+  const [lovedProperties, setLovedProperties] = useState([]);
+
+  // Add this state to track if an undo operation is in progress
+  const [isUndoInProgress, setIsUndoInProgress] = useState(false);
+
+  // Add this new state for the fade-in animation
+  const [redoCardId, setRedoCardId] = useState(null);
+  const [redoCardOpacity] = useState(new Animated.Value(1));
+
+  // Add this state to store cached images for redone cards
+  const [cachedCardImages, setCachedCardImages] = useState({});
+
+  // Add this state to track when a redo operation is in progress
+  const [redoInProgress, setRedoInProgress] = useState(false);
+
+  // Add these new state variables to track different card categories
+  const [cardCategories, setCardCategories] = useState({
+    passedCards: [], // Cards that have been swiped (limited history)
+    redoCard: null,  // Currently redone card (if any)
+    activeCard: null, // Current top card
+    onDeckCards: [], // Next 3 cards that will become active (should remain stable)
+    futureCards: []  // Cards that can be safely reordered
+  });
+
+  // 4) Define all functions BEFORE any conditional returns
+  // Use useCallback to prevent unnecessary re-renders
+  const animateHeart = useCallback(() => {
+    // Show the heart overlay
+    setShowHeartOverlay(true);
+    setOverlayIcon('♥');
+    
+    // Animate overlay opacity
+    Animated.timing(overlayOpacity, {
+      toValue: 1,
+      duration: 100,
+      useNativeDriver: true
+    }).start();
+    
+    // Animate heart scaling
+    heartScale.setValue(0.1);
+    Animated.sequence([
+      Animated.spring(heartScale, {
+        toValue: 1.2,
+        friction: 4,
+        tension: 40,
+        useNativeDriver: true
+      }),
+      Animated.timing(heartScale, {
+        toValue: 0,
+        duration: 300,
+        delay: 300,
+        useNativeDriver: true
+      })
+    ]).start();
+    
+    // Hide the overlay after animation
+    setTimeout(() => {
+      Animated.timing(overlayOpacity, {
+        toValue: 0,
+        duration: 300,
+        useNativeDriver: true
+      }).start(() => {
+        setShowHeartOverlay(false);
+        setOverlayIcon(null);
+      });
+    }, 800);
+  }, [heartScale, overlayOpacity]);
+
+  const handleInteraction = useCallback(() => {
+    if (!hasInteracted) setHasInteracted(true);
+    if (showTutorial) setShowTutorial(false);
+  }, [hasInteracted, showTutorial]);
+
+  // Add this function to manage the card categories
+  const updateCardCategories = useCallback(() => {
+    if (currentDeck.length === 0) return;
+    
+    // The active card is the one at the current index
+    const active = currentDeck[currentIndex] || null;
+    
+    // On deck cards are the next 3 cards after the active one
+    const onDeck = currentDeck.slice(currentIndex + 1, currentIndex + 4);
+    
+    // Future cards are all cards beyond the on deck cards
+    const future = currentDeck.slice(currentIndex + 4);
+    
+    // Update the categories
+    setCardCategories(prev => ({
+      ...prev,
+      activeCard: active,
+      onDeckCards: onDeck,
+      futureCards: future
+    }));
+  }, [currentDeck, currentIndex]);
+
+  // Call this function whenever the deck or current index changes
+  useEffect(() => {
+    updateCardCategories();
+  }, [currentDeck, currentIndex, updateCardCategories]);
+
+  const handleSwipe = useCallback((cardIndex, direction) => {
+    handleInteraction();
+    const swipedCard = currentDeck[cardIndex];
+    if (!swipedCard) return;
+
+    // Reset the redo in progress state when a new card is swiped
+    setIsUndoInProgress(false);
+    setRedoInProgress(false);
+    
+    // Clear the redoCard from categories
+    setCardCategories(prev => ({
+      ...prev,
+      redoCard: null,
+      // Add the swiped card to passed cards (limited history)
+      passedCards: [...prev.passedCards.slice(-9), { ...swipedCard, swipeDirection: direction }]
+    }));
+    
+    // Clear the redoCardId if this was a redone card
+    if (swipedCard.id === redoCardId || swipedCard.isRedoCard || swipedCard._redoProtected || swipedCard._absoluteProtection) {
+      setRedoCardId(null);
+    }
+
+    // Cache the card's images when it's swiped for potential redo
+    if (swipedCard.images && swipedCard.images.length > 0) {
+      setCachedCardImages(prev => ({
+        ...prev,
+        [swipedCard.id]: swipedCard.images
+      }));
+    }
+
+    // Create a clean version of the card without any redo-specific properties
+    const cleanCard = {...swipedCard};
+    if (cleanCard.isRedoCard) delete cleanCard.isRedoCard;
+    if (cleanCard.redoTimestamp) delete cleanCard.redoTimestamp;
+    if (cleanCard.bypassFiltering) delete cleanCard.bypassFiltering;
+    if (cleanCard.forceDisplay) delete cleanCard.forceDisplay;
+    if (cleanCard.mustNotBeReplaced) delete cleanCard.mustNotBeReplaced;
+    if (cleanCard.redoLock) delete cleanCard.redoLock;
+    if (cleanCard.uniqueRedoId) delete cleanCard.uniqueRedoId;
+    if (cleanCard._redoProtected) delete cleanCard._redoProtected;
+    if (cleanCard._absoluteProtection) delete cleanCard._absoluteProtection;
+
+    // Add the clean card to the swiped cards array for undo functionality
+    setSwipedCards(prev => [...prev, { ...cleanCard, swipeDirection: direction }]);
+    
+    // Update the current index
+    setCurrentIndex(cardIndex + 1);
+    
+    // Handle the swipe action based on direction
+    if (direction === 'left') {
+      // Dislike - no action needed other than tracking
+      Vibration.vibrate(50);
+    } else if (direction === 'right') {
+      // Like - add to saved properties
+      addToSaved(swipedCard);
+      Vibration.vibrate(50);
+    } else if (direction === 'top') {
+      // Super Like - add to saved properties with a love flag
+      addToSaved({ ...swipedCard, loved: true });
+      animateHeart();
+      Vibration.vibrate([0, 50, 50, 100]);
+    }
+    
+    // Update user match metric if user is logged in
+    if (auth.currentUser) {
+      console.log(`Updating user match metric for property: ${swipedCard.id}`);
+      console.log(`Property match metric: ${swipedCard.propertyMatchMetric}`);
+      
+      updateUserMatchMetric(
+        auth.currentUser.uid,
+        swipedCard.id,
+        swipedCard.propertyMatchMetric,
+        direction
+      ).then(updatedMetric => {
+        if (updatedMetric) {
+          console.log('Updated user match metric:', JSON.stringify(updatedMetric));
+          setUserMatchMetric(updatedMetric);
+          setDislikedProperties(updatedMetric.dislikedProperties || []);
+          setLikedProperties(updatedMetric.likedProperties || []);
+          setLovedProperties(updatedMetric.lovedProperties || []);
+          
+          // Only reorder if no redo is in progress
+          if (!redoInProgress && !isUndoInProgress && !cardCategories.redoCard) {
+            // IMPORTANT: Keep the next 3 cards stable, only reorder cards beyond that
+            // This ensures the active card and next few cards remain unchanged
+            const stableCardCount = 3; // Keep current card + next 3 cards stable
+            const stableCards = currentDeck.slice(currentIndex, currentIndex + stableCardCount);
+            const cardsToReorder = currentDeck.slice(currentIndex + stableCardCount);
+            
+            if (cardsToReorder.length > 0) {
+              console.log(`Reordering ${cardsToReorder.length} future properties based on updated user metric`);
+              console.log(`Keeping ${stableCardCount} cards stable (current + next ${stableCardCount-1})`);
+              
+              // Process and sort only the cards beyond the stable ones
+              const reorderedFutureCards = processPropertiesForUser(
+                updatedMetric.currentMetric,
+                cardsToReorder,
+                updatedMetric.dislikedProperties,
+                false,
+                100
+              );
+              
+              // Sort the reordered future cards
+              const sortedFutureCards = sortPropertiesByMatchScore(
+                updatedMetric.currentMetric,
+                reorderedFutureCards
+              );
+              
+              // Update the current deck, preserving stable cards
+              setCurrentDeckWithProtection(prev => {
+                const newDeck = [...prev];
+                newDeck.splice(currentIndex, 0, ...sortedFutureCards);
+                return newDeck;
+              });
+              
+              console.log(`Updated deck: ${stableCards.length} stable cards + ${sortedFutureCards.length} reordered cards`);
+            }
+          } else {
+            console.log('Skipping deck reordering due to redo in progress');
+          }
+        }
+      }).catch(error => {
+        console.error('Error updating user match metric:', error);
+      });
+    }
+  }, [addToSaved, animateHeart, currentDeck, handleInteraction, cardCategories, removeFromSaved, setDislikedProperties, setLikedProperties, setLovedProperties, setUserMatchMetric, currentIndex, setCurrentDeckWithProtection, redoInProgress, isUndoInProgress, redoCardId]);
+
+  // Modify the setCurrentDeck function to always preserve redone cards
+  const setCurrentDeckWithProtection = useCallback((newDeckOrUpdater) => {
+    setCurrentDeck(prevDeck => {
+      // Get the new deck (whether it's a function or direct value)
+      const calculatedNewDeck = typeof newDeckOrUpdater === 'function' 
+        ? newDeckOrUpdater(prevDeck) 
+        : newDeckOrUpdater;
+      
+      // Check if there's a redone card in the current deck that needs protection
+      const redoCardIndex = prevDeck.findIndex(card => 
+        card.isRedoCard || card._redoProtected || card._absoluteProtection || 
+        (redoCardId && card.id === redoCardId)
+      );
+      
+      // If no redone card, just return the new deck
+      if (redoCardIndex === -1) return calculatedNewDeck;
+      
+      // If there is a redone card, make sure it's preserved in the new deck
+      const redoCard = prevDeck[redoCardIndex];
+      console.log(`Preserving redone card at index ${redoCardIndex}: ${redoCard.address}`);
+      
+      // Create a new deck with the redone card preserved at its original position
+      const protectedDeck = [...calculatedNewDeck];
+      
+      // If the redone card is at the current index, make sure it stays there
+      if (redoCardIndex === currentIndex) {
+        protectedDeck[currentIndex] = redoCard;
+        console.log('Protected redone card at current index');
+      } else {
+        // Otherwise, insert it at its original position
+        protectedDeck.splice(redoCardIndex, 0, redoCard);
+        // Remove any duplicate that might have been added
+        const duplicateIndex = protectedDeck.findIndex((card, idx) => 
+          idx !== redoCardIndex && card.id === redoCard.id
+        );
+        if (duplicateIndex !== -1) {
+          protectedDeck.splice(duplicateIndex, 1);
+        }
+        console.log('Protected redone card at its original position');
+      }
+      
+      return protectedDeck;
+    });
+  }, [currentIndex, redoCardId]);
+
+  const handleRedo = useCallback(() => {
+    // Only allow redo if not already in progress and there are passed cards
+    if (isUndoInProgress || cardCategories.passedCards.length === 0) return;
+    
+    handleInteraction();
+    setHasInteracted(true);
+    setShowTutorial(false);
+    
+    // Set redo in progress
+    setIsUndoInProgress(true);
+    setRedoInProgress(true);
+    
+    // Get the most recently passed card
+    const lastPassedCard = cardCategories.passedCards[cardCategories.passedCards.length - 1];
+    const swipeDirection = lastPassedCard.swipeDirection;
+    
+    console.log(`REDO: Bringing back property - MLS ID: ${lastPassedCard.mlsNumber}`);
+    
+    // Set the redoCardId
+    setRedoCardId(lastPassedCard.id);
+    
+    // Start with opacity at 0
+    redoCardOpacity.setValue(0);
+    
+    // Remove the card from passed cards
+    setCardCategories(prev => ({
+      ...prev,
+      passedCards: prev.passedCards.slice(0, -1),
+      redoCard: {
+        ...lastPassedCard,
+        isRedoCard: true,
+        bypassFiltering: true,
+        redoTimestamp: Date.now(),
+        forceDisplay: true,
+        mustNotBeReplaced: true,
+        redoLock: true,
+        uniqueRedoId: `redo-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+        priority: 9999,
+        _redoProtected: true,
+        _absoluteProtection: true
+      }
+    }));
+    
+    // Decrement the current index
+    setCurrentIndex(prev => Math.max(0, prev - 1));
+    
+    // Create the redone card with special flags
+    const redoCardWithFlag = {
+      ...lastPassedCard,
+      isRedoCard: true,
+      bypassFiltering: true,
+      redoTimestamp: Date.now(),
+      forceDisplay: true,
+      mustNotBeReplaced: true,
+      redoLock: true,
+      uniqueRedoId: `redo-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+      priority: 9999,
+      _redoProtected: true,
+      _absoluteProtection: true
+    };
+    
+    // Add the card back to the deck at the current position
+    // Use setCurrentDeckWithProtection instead of setCurrentDeck
+    setCurrentDeckWithProtection(prev => {
+      const newDeck = [...prev];
+      newDeck.splice(currentIndex, 0, redoCardWithFlag);
+      return newDeck;
+    });
+    
+    // Animate the card fading in
+    Animated.timing(redoCardOpacity, {
+      toValue: 1,
+      duration: 2500,
+      useNativeDriver: true
+    }).start();
+    
+    // Undo the user match metric update in the background
+    if (auth.currentUser) {
+      const userId = auth.currentUser.uid;
+      console.log(`Background: Undoing user match metric update for property: ${lastPassedCard.id}`);
+      
+      setTimeout(() => {
+        undoUserMatchMetricInBackground(userId, lastPassedCard.id, swipeDirection);
+      }, 500);
+      
+      if (swipeDirection === 'right' || swipeDirection === 'top') {
+        removeFromSaved(lastPassedCard.id);
+      }
+    }
+  }, [cardCategories, currentIndex, isUndoInProgress, redoCardOpacity, removeFromSaved, handleInteraction, setCurrentDeckWithProtection]);
+
+  // Add this new function to handle database updates in the background
+  const undoUserMatchMetricInBackground = async (userId, propertyId, swipeDirection) => {
+    try {
+      console.log(`Background: Undoing user match metric update for property: ${propertyId}`);
+      
+      // Get the current user swipe count
+      const swipeCount = await getUserSwipeCount(userId);
+      if (!swipeCount) return;
+      
+      // Create an updated swipe count object
+      const updatedSwipeCount = { ...swipeCount };
+      
+      // Decrement the appropriate counter based on swipe direction
+      if (swipeDirection === 'left') {
+        updatedSwipeCount.LeftSwipes = Math.max(0, (updatedSwipeCount.LeftSwipes || 0) - 1);
+      } else if (swipeDirection === 'right') {
+        updatedSwipeCount.RightSwipes = Math.max(0, (updatedSwipeCount.RightSwipes || 0) - 1);
+      } else if (swipeDirection === 'top') {
+        updatedSwipeCount.UpSwipes = Math.max(0, (updatedSwipeCount.UpSwipes || 0) - 1);
+      }
+      
+      // Decrement the total swipes counter
+      updatedSwipeCount.TotalSwipes = Math.max(0, (updatedSwipeCount.TotalSwipes || 0) - 1);
+      updatedSwipeCount.LastUpdated = new Date();
+      
+      // Save the updated swipe count to Firestore
+      const swipeCountRef = doc(db, 'Users', userId, 'SwipeCount', 'Current');
+      await setDoc(swipeCountRef, updatedSwipeCount);
+      
+      console.log(`Updated swipe count after redo. Total swipes: ${updatedSwipeCount.TotalSwipes}`);
+      
+      // Get the current user match metric
+      const userMatchMetricRef = doc(db, 'Users', userId, 'UserMatchMetric', 'Current');
+      const userMatchMetricDoc = await getDoc(userMatchMetricRef);
+      
+      if (userMatchMetricDoc.exists()) {
+        const userMatchMetric = userMatchMetricDoc.data();
+        
+        // Create an updated user match metric object
+        const updatedMetric = { ...userMatchMetric };
+        
+        // Update the GlobalSwipeCount to match the TotalSwipes
+        updatedMetric.GlobalSwipeCount = updatedSwipeCount.TotalSwipes;
+        
+        // Undo the specific action based on the swipe direction
+        if (swipeDirection === 'left') {
+          // Remove from disliked properties
+          updatedMetric.DislikedProperties = (updatedMetric.DislikedProperties || []).filter(item => 
+            typeof item === 'string' 
+              ? item !== propertyId 
+              : item.id !== propertyId
+          );
+        } else if (swipeDirection === 'right') {
+          // Remove from liked properties
+          updatedMetric.LikedProperties = (updatedMetric.LikedProperties || []).filter(id => id !== propertyId);
+        } else if (swipeDirection === 'top') {
+          // Remove from loved properties
+          updatedMetric.LovedProperties = (updatedMetric.LovedProperties || []).filter(id => id !== propertyId);
+        }
+        
+        // Save the updated user match metric to Firestore
+        await setDoc(userMatchMetricRef, updatedMetric);
+        
+        console.log('Updated user match metric after redo in background');
+      }
+    } catch (error) {
+      console.error('Error undoing user match metric update in background:', error);
+    }
+  };
+
+  const applyFilters = useCallback((newFilters) => {
+    console.log('Applying filters to HomeScreen:', newFilters);
+    const updatedFilters = { ...newFilters, hasBeenSet: true };
+    
+    // IMPORTANT: Reset all state before applying new filters
+    setIsLoading(true); // Show loading indicator immediately
+    
+    // Clear all existing data
+    setCurrentDeck([]);
+    setAllListings([]);
+    setCurrentIndex(0);
+    setSwipedCards([]);
+    setCardCategories({
+      passedCards: [],
+      redoCard: null,
+      activeCard: null,
+      onDeckCards: [],
+      futureCards: []
+    });
+    
+    // Reset pagination info to force a fresh fetch
+    setPaginationInfo({
+      hasMoreProperties: false,
+      nextPageToken: null,
+      currentPage: 1,
+      totalFetched: 0
+    });
+    
+    // Update filter state AFTER clearing data
+    setFilters(updatedFilters);
+    setFiltersApplied(true);
+    setCurrentFilters(updatedFilters);
+    
+    // Close the filter modal immediately to show loading state
+    setIsFilterModalVisible(false);
+    
+    // Use setTimeout to ensure the UI updates before starting the fetch
+    setTimeout(() => {
+      // Fetch fresh data with the new filters
+      async function fetchFreshData() {
+        try {
+          // Load user match metric first
+          let currentUserMetric = null;
+          if (auth.currentUser) {
+            try {
+              console.log('Loading user match metric before applying filters...');
+              currentUserMetric = await getUserMatchMetric(auth.currentUser.uid);
+              
+              if (currentUserMetric) {
+                setUserMatchMetric(currentUserMetric);
+                setDislikedProperties(currentUserMetric.dislikedProperties || []);
+                setLikedProperties(currentUserMetric.likedProperties || []);
+                setLovedProperties(currentUserMetric.lovedProperties || []);
+                console.log('Successfully loaded user match metric with', 
+                  currentUserMetric.dislikedProperties?.length || 0, 'disliked properties');
+              }
+            } catch (error) {
+              console.error('Error loading user match metric before applying filters:', error);
+            }
+          }
+          
+          // Make a fresh API call with the new filters
+          console.log('Fetching new properties with filters:', updatedFilters);
+          const result = await fetchMLSData(updatedFilters);
+          console.log(`Fetched ${result.properties.length} properties with new filters`);
+          
+          // Store pagination info for background loading
+          if (result.pagination) {
+            setPaginationInfo(result.pagination);
+          }
+          
+          // Process the new data
+          const mapped = result.properties.map((item, idx) => {
+            // Process images array
+            let images = [];
+            
+            if (item.Media && Array.isArray(item.Media)) {
+              // Filter for photos and map to proper image objects
+              images = item.Media
+                .filter(m => m.MediaCategory === 'Photo' && m.MediaURL)
+                .map(m => ({ uri: m.MediaURL }));
+            }
+            
+            // If no images were found, use a placeholder
+            if (images.length === 0) {
+              images.push(require('../../assets/house1.jpeg'));
+            }
+            
+            // Create a property object with all the necessary data
+            const property = {
+              id: item['@odata.id'] || `property-${idx}`,
+              ListingId: item.ListingId || '',
+              listingId: item.ListingId || '',
+              mlsNumber: item.ListingId || item.MLSNumber || '',
+              price: item.ListPrice || 0,
+              beds: item.BedroomsTotal || 0,
+              baths: item.BathroomsTotalInteger || 0,
+              sqft: item.LivingArea || 0,
+              address: `${item.StreetNumber || ''} ${item.StreetName || ''}, ${item.City || ''}, ${item.StateOrProvince || ''}`,
+              images: images,
+              yearBuilt: item.YearBuilt ? item.YearBuilt.toString() : 'N/A',
+              lotSize: item.LotSizeSquareFeet || 0,
+              propertyType: item.PropertyType || '',
+              propertySubType: item.PropertySubType || '',
+              daysOnMarket: item.DaysOnMarket || 0,
+              listingStatus: item.StandardStatus || 'Active',
+              description: item.PublicRemarks || '',
+              listingOffice: item.ListingOffice || item.ListOfficeName || 'MLS Listing'
+            };
+            
+            // Calculate property match metric
+            property.propertyMatchMetric = getPropertyMatchMetric(property);
+            
+            return property;
+          });
+          
+          // Filter and sort the new data
+          let filteredProperties = mapped;
+          if (currentUserMetric && currentUserMetric.dislikedProperties && currentUserMetric.dislikedProperties.length > 0) {
+            const currentSwipeCount = currentUserMetric.globalSwipeCount || 0;
+            const cooldownSwipes = 100; // Set cooldown to 100 swipes
+            
+            console.log(`Pre-filtering ${mapped.length} properties against ${currentUserMetric.dislikedProperties.length} disliked properties...`);
+            
+            filteredProperties = mapped.filter(property => {
+              // Check if the property is in the disliked list
+              const dislikedEntry = currentUserMetric.dislikedProperties.find(item => 
+                typeof item === 'string' ? item === property.id : item.id === property.id
+              );
+              
+              // If not disliked, include the property
+              if (!dislikedEntry) return true;
+              
+              // If it's a string (old format), exclude it
+              if (typeof dislikedEntry === 'string') {
+                console.log(`Filtering out disliked property: ${property.address} (old format)`);
+                return false;
+              }
+              
+              // Check if the cooldown period has passed
+              const swipesSinceDisliked = currentSwipeCount - dislikedEntry.dislikedAtSwipeCount;
+              const inCooldown = swipesSinceDisliked < cooldownSwipes;
+              
+              if (inCooldown) {
+                console.log(`Filtering out property ${property.address} in cooldown: ${swipesSinceDisliked}/${cooldownSwipes} swipes since disliked`);
+                return false;
+              } else {
+                console.log(`Property ${property.address} cooldown expired: ${swipesSinceDisliked}/${cooldownSwipes} swipes since disliked`);
+                return true;
+              }
+            });
+            
+            console.log(`Pre-filtered out ${mapped.length - filteredProperties.length} disliked properties (including ${cooldownSwipes}-swipe cooldown)`);
+          }
+          
+          let sortedProperties = filteredProperties;
+          if (currentUserMetric && currentUserMetric.currentMetric) {
+            console.log('Sorting initial properties by user match metric:', currentUserMetric.currentMetric);
+            sortedProperties = sortPropertiesByMatchScore(currentUserMetric.currentMetric, filteredProperties);
+            console.log(`Sorted ${sortedProperties.length} properties by match score`);
+          } else {
+            console.log('No user match metric available for initial sorting');
+          }
+          
+          // Set the new data
+          console.log(`Setting ${sortedProperties.length} new properties after filter change`);
+          setCurrentIndex(0);
+          setAllListings(mapped);
+          setCurrentDeckWithProtection(sortedProperties);
+          
+          // Handle empty results
+          if (sortedProperties.length === 0) {
+            setCurrentDeck([{ isPlaceholder: true }]);
+          }
+          
+          // Update card categories
+          updateCardCategories();
+          
+          // Start background loading if needed
+          if (result.pagination && result.pagination.hasMoreProperties && result.pagination.nextPageToken) {
+            console.log('Starting background loading of additional properties...');
+            setTimeout(() => {
+              loadMorePropertiesInBackground(result.pagination.nextPageToken, updatedFilters, mapped.length);
+            }, 500);
+          }
+        } catch (error) {
+          console.error('Failed to apply new filters:', error);
+          setCurrentDeck([{ isPlaceholder: true }]);
+        } finally {
+          setIsLoading(false);
+        }
+      }
+      
+      fetchFreshData();
+    }, 50); // Small delay to ensure UI updates first
+  }, [dislikedProperties, loadMorePropertiesInBackground, userMatchMetric, setCurrentDeckWithProtection, updateCardCategories]);
+
+  // Function to load more properties in the background
+  const loadMorePropertiesInBackground = useCallback(async (nextPageToken, filters, initialCount = 0) => {
+    if (!nextPageToken || isLoadingMore) return;
+    
+    try {
+      setIsLoadingMore(true);
+      console.log('Loading more properties in background...');
+      
+      const result = await fetchMoreMLSData(nextPageToken, filters);
+      console.log(`Loaded ${result.properties.length} more properties in background`);
+      
+      // Update pagination info if it exists
+      if (result.pagination) {
+        setPaginationInfo(result.pagination);
+      }
+      
+      // Map the new properties
+      const mapped = result.properties.map((item, idx) => {
+        // Process images array
+        let images = [];
+        
+        if (item.Media && Array.isArray(item.Media)) {
+          // Filter for photos and map to proper image objects
+          images = item.Media
+            .filter(m => m.MediaCategory === 'Photo' && m.MediaURL)
+            .map(m => ({ uri: m.MediaURL }));
+        }
+        
+        // If no images were found, use a placeholder
+        if (images.length === 0) {
+          images.push(require('../../assets/house1.jpeg'));
+        }
+        
+        // Create a property object with all the necessary data
+        const property = {
+          id: item['@odata.id'] || `property-${idx + allListings.length}`,
+          ListingId: item.ListingId || '',
+          listingId: item.ListingId || '',
+          mlsNumber: item.ListingId || item.MLSNumber || '',
+          price: item.ListPrice || 0,
+          beds: item.BedroomsTotal || 0,
+          baths: item.BathroomsTotalInteger || 0,
+          sqft: item.LivingArea || 0,
+          address: `${item.StreetNumber || ''} ${item.StreetName || ''}, ${item.City || ''}, ${item.StateOrProvince || ''}`,
+          images: images,
+          yearBuilt: item.YearBuilt ? item.YearBuilt.toString() : 'N/A',
+          lotSize: item.LotSizeSquareFeet || 0,
+          propertyType: item.PropertyType || '',
+          propertySubType: item.PropertySubType || '',
+          daysOnMarket: item.DaysOnMarket || 0,
+          listingStatus: item.StandardStatus || 'Active',
+          description: item.PublicRemarks || '',
+          listingOffice: item.ListingOffice || item.ListOfficeName || 'MLS Listing'
+        };
+        
+        // Calculate property match metric
+        property.propertyMatchMetric = getPropertyMatchMetric(property);
+        
+        return property;
+      });
+      
+      // Add the new properties to the existing ones
+      let updatedListings = [];
+      setAllListings(prev => {
+        updatedListings = [...prev, ...mapped];
+        return updatedListings;
+      });
+      
+      // Filter out disliked properties with cooldown
+      let filteredProperties = mapped;
+      if (dislikedProperties && dislikedProperties.length > 0) {
+        const currentSwipeCount = currentUserMetric?.globalSwipeCount || 0;
+        const cooldownSwipes = 100; // Set cooldown to 100 swipes
+        
+        filteredProperties = mapped.filter(property => {
+          // Check if the property is in the disliked list
+          const dislikedEntry = dislikedProperties.find(item => 
+            typeof item === 'string' ? item === property.id : item.id === property.id
+          );
+          
+          // If not disliked, include the property
+          if (!dislikedEntry) return true;
+          
+          // If it's a string (old format), exclude it
+          if (typeof dislikedEntry === 'string') return false;
+          
+          // Check if the cooldown period has passed
+          const swipesSinceDisliked = currentSwipeCount - dislikedEntry.dislikedAtSwipeCount;
+          const inCooldown = swipesSinceDisliked < cooldownSwipes;
+          
+          if (inCooldown) {
+            console.log(`Property ${property.id} is in cooldown: ${swipesSinceDisliked}/${cooldownSwipes} swipes since disliked`);
+          }
+          
+          // Include the property only if the cooldown period has passed
+          return !inCooldown;
+        });
+        
+        console.log(`Filtered out ${mapped.length - filteredProperties.length} disliked properties (including ${cooldownSwipes}-swipe cooldown)`);
+      }
+      
+      // Sort properties by match score if user metric is available
+      let sortedProperties = filteredProperties;
+      if (userMatchMetric && userMatchMetric.currentMetric) {
+        sortedProperties = sortPropertiesByMatchScore(userMatchMetric.currentMetric, filteredProperties);
+        console.log(`Sorted ${sortedProperties.length} background-loaded properties by match score`);
+      }
+      
+      // Update the current deck with the new properties, but maintain stability of visible cards
+      setCurrentDeckWithProtection(prev => {
+        // IMPORTANT: Keep more cards stable - current + next 3
+        const stableCardCount = 4; // Current card + next 3 cards
+        const stableCards = prev.slice(currentIndex, currentIndex + stableCardCount);
+        
+        console.log(`Keeping ${stableCards.length} cards stable during background loading`);
+        
+        // Combine remaining cards with new sorted properties
+        const combinedCards = [...prev.slice(currentIndex + stableCardCount), ...sortedProperties];
+        
+        // Sort the combined cards if user metric is available
+        let sortedCombinedCards = combinedCards;
+        if (userMatchMetric && userMatchMetric.currentMetric) {
+          sortedCombinedCards = sortPropertiesByMatchScore(userMatchMetric.currentMetric, combinedCards);
+        }
+        
+        // Return stable cards followed by sorted combined cards
+        return [...stableCards, ...sortedCombinedCards];
+      });
+      
+      // Continue loading more properties if available
+      if (result.pagination && result.pagination.hasMoreProperties && result.pagination.nextPageToken) {
+        // Add a delay to prevent overwhelming the API
+        setTimeout(() => {
+          loadMorePropertiesInBackground(result.pagination.nextPageToken, filters, updatedListings.length);
+        }, 1000);
+      }
+    } catch (error) {
+      console.error('Error loading more properties in background:', error);
+    } finally {
+      setIsLoadingMore(false);
+    }
+  }, [allListings, currentIndex, dislikedProperties, isLoadingMore, userMatchMetric, setCurrentDeckWithProtection]);
+
+  const clearFilters = useCallback(() => {
+    const defaultFilters = {
+      screen: 'home',
+      priceRange: { min: 0, max: 2000000 },
+      beds: [],
+      baths: [],
+      sqft: { min: 0, max: 10000 },
+      yearBuilt: { min: 1900, max: 2024 },
+      homeType: [],
+      hasBeenSet: false
+    };
+    setFilters(defaultFilters);
+    setCurrentDeck(allListings);
+    setCurrentIndex(0);
+    setIsFilterModalVisible(false);
+  }, [allListings]);
+
+  // Add a function to load the user's match metric
+  const loadUserMatchMetric = useCallback(async () => {
+    try {
+      if (auth.currentUser) {
+        const userId = auth.currentUser.uid;
+        const metric = await getUserMatchMetric(userId);
+        console.log('Loaded user match metric:', metric);
+        setUserMatchMetric(metric);
+        
+        // Set the disliked, liked, and loved properties arrays
+        setDislikedProperties(metric.dislikedProperties || []);
+        setLikedProperties(metric.likedProperties || []);
+        setLovedProperties(metric.lovedProperties || []);
+      }
+    } catch (error) {
+      console.error('Error loading user match metric:', error);
+    }
+  }, []);
+
+  // Add a function to check if the user has seen the tutorial
+  const checkTutorialStatus = useCallback(async () => {
+    try {
+      if (auth.currentUser) {
+        const userId = auth.currentUser.uid;
+        const userDocRef = doc(db, 'Users', userId);
+        const userDoc = await getDoc(userDocRef);
+        
+        if (userDoc.exists()) {
+          const userData = userDoc.data();
+          // If the user has not seen the tutorial, show it
+          if (!userData.hasSeenTutorial) {
+            setShowTutorial(true);
+            // Update the user document to indicate they've seen the tutorial
+            await setDoc(userDocRef, { hasSeenTutorial: true }, { merge: true });
+          }
+        }
+      } else {
+        // If no user is logged in, show the tutorial anyway
+        setShowTutorial(true);
+      }
+    } catch (error) {
+      console.error('Error checking tutorial status:', error);
+      // If there's an error, default to showing the tutorial
+      setShowTutorial(true);
+    }
+  }, []);
+
+  // Fix the filter application in HomeScreen.js
+  useEffect(() => {
+    // Load user match metric first
+    loadUserMatchMetric();
+    
+    // Check if there's an active filter in Firebase when the component mounts
+    async function checkForActiveFilter() {
+      try {
+        setIsLoading(true);
+        const userId = auth.currentUser?.uid;
+        
+        if (userId) {
+          // Get filters from the Users/{userId}/Filters collection
+          const filtersRef = collection(db, 'Users', userId, 'Filters');
+          const querySnapshot = await getDocs(filtersRef);
+          
+          let activeFilter = null;
+          
+          querySnapshot.forEach((doc) => {
+            const data = doc.data();
+            if (data.IsActive) {
+              activeFilter = {
+                id: doc.id,
+                priceRange: {
+                  min: data.PriceRange?.Min || 0,
+                  max: data.PriceRange?.Max || 2000000
+                },
+                beds: data.Beds || [],
+                baths: data.Baths || [],
+                homeType: data.HomeType || [],
+                sqft: {
+                  min: data.Sqft?.Min || 0,
+                  max: data.Sqft?.Max || 10000
+                },
+                yearBuilt: {
+                  min: data.YearBuilt?.Min || 1900,
+                  max: data.YearBuilt?.Max || new Date().getFullYear()
+                },
+                activeFilterId: doc.id
+              };
+            }
+          });
+          
+          // If we found an active filter, apply it
+          if (activeFilter) {
+            console.log('Found active filter, applying:', activeFilter);
+            setFilters(prevFilters => ({ ...prevFilters, ...activeFilter, hasBeenSet: true }));
+            setFiltersApplied(true);
+            await loadInitialData(activeFilter);
+          } else {
+            // No active filter, load all data
+            console.log('No active filter found, loading all data');
+            await loadInitialData(null);
+          }
+        } else {
+          // No user ID, load all data
+          console.log('No user ID found, loading all data');
+          await loadInitialData(null);
+        }
+      } catch (error) {
+        console.error('Error checking for active filter:', error);
+        // Load all data if there's an error
+        await loadInitialData(null);
+      } finally {
+        setIsLoading(false);
+      }
+    }
+
+    // Define the loadData function inside the useEffect
+    async function loadInitialData(filterOverride = null) {
+      try {
+        setIsLoading(true);
+        // Use filterOverride if provided, otherwise use the state filters
+        const filtersToUse = filterOverride || (filtersApplied ? filters : null);
+        console.log('Loading data with filters:', filtersToUse);
+        setCurrentFilters(filtersToUse); // Store current filters for background loading
+        
+        // IMPORTANT: First load the user match metric BEFORE fetching properties
+        // This ensures we have the disliked properties list ready
+        let currentUserMetric = null;
+        if (auth.currentUser) {
+          try {
+            console.log('Loading user match metric before fetching properties...');
+            currentUserMetric = await getUserMatchMetric(auth.currentUser.uid);
+            console.log('Successfully loaded user match metric with', 
+              currentUserMetric.dislikedProperties?.length || 0, 'disliked properties');
+          } catch (error) {
+            console.error('Error loading user match metric before fetching:', error);
+          }
+        }
+        
+        // Now fetch properties with the filters
+        const result = await fetchMLSData(filtersToUse);
+        console.log(`Fetched ${result.properties.length} properties with filters:`, filtersToUse || 'No filters applied');
+        
+        // Store pagination info for background loading if it exists
+        if (result.pagination) {
+          setPaginationInfo(result.pagination);
+        }
+        
+        // Map the filtered data
+        const mapped = result.properties.map((item, idx) => {
+          // Process images array
+          let images = [];
+          
+          if (item.Media && Array.isArray(item.Media)) {
+            // Filter for photos and map to proper image objects
+            images = item.Media
+              .filter(m => m.MediaCategory === 'Photo' && m.MediaURL)
+              .map(m => ({ uri: m.MediaURL }));
+          }
+          
+          // If no images were found, use a placeholder
+          if (images.length === 0) {
+            images.push(require('../../assets/house1.jpeg'));
+          }
+          
+          // Create a property object with all the necessary data
+          const property = {
+            id: item['@odata.id'] || `property-${idx}`,
+            ListingId: item.ListingId || '',
+            listingId: item.ListingId || '',
+            mlsNumber: item.ListingId || item.MLSNumber || '',
+            price: item.ListPrice || 0,
+            beds: item.BedroomsTotal || 0,
+            baths: item.BathroomsTotalInteger || 0,
+            sqft: item.LivingArea || 0,
+            address: `${item.StreetNumber || ''} ${item.StreetName || ''}, ${item.City || ''}, ${item.StateOrProvince || ''}`,
+            images: images,
+            yearBuilt: item.YearBuilt ? item.YearBuilt.toString() : 'N/A',
+            lotSize: item.LotSizeSquareFeet || 0,
+            propertyType: item.PropertyType || '',
+            propertySubType: item.PropertySubType || '',
+            daysOnMarket: item.DaysOnMarket || 0,
+            listingStatus: item.StandardStatus || 'Active',
+            description: item.PublicRemarks || '',
+            listingOffice: item.ListingOffice || item.ListOfficeName || 'MLS Listing'
+          };
+          
+          // Calculate property match metric
+          property.propertyMatchMetric = getPropertyMatchMetric(property);
+          
+          return property;
+        });
+        
+        // Update state with the user match metric if we loaded it
+        if (currentUserMetric) {
+          setUserMatchMetric(currentUserMetric);
+          setDislikedProperties(currentUserMetric.dislikedProperties || []);
+          setLikedProperties(currentUserMetric.likedProperties || []);
+          setLovedProperties(currentUserMetric.lovedProperties || []);
+        }
+        
+        // Filter out disliked properties with cooldown
+        let filteredProperties = mapped;
+        if (currentUserMetric && currentUserMetric.dislikedProperties && currentUserMetric.dislikedProperties.length > 0) {
+          const currentSwipeCount = currentUserMetric.globalSwipeCount || 0;
+          const cooldownSwipes = 100; // Set cooldown to 100 swipes
+          
+          console.log(`Pre-filtering ${mapped.length} properties against ${currentUserMetric.dislikedProperties.length} disliked properties...`);
+          
+          filteredProperties = mapped.filter(property => {
+            // Check if the property is in the disliked list
+            const dislikedEntry = currentUserMetric.dislikedProperties.find(item => 
+              typeof item === 'string' ? item === property.id : item.id === property.id
+            );
+            
+            // If not disliked, include the property
+            if (!dislikedEntry) return true;
+            
+            // If it's a string (old format), exclude it
+            if (typeof dislikedEntry === 'string') {
+              console.log(`Filtering out disliked property: ${property.address} (old format)`);
+              return false;
+            }
+            
+            // Check if the cooldown period has passed
+            const swipesSinceDisliked = currentSwipeCount - dislikedEntry.dislikedAtSwipeCount;
+            const inCooldown = swipesSinceDisliked < cooldownSwipes;
+            
+            if (inCooldown) {
+              console.log(`Filtering out property ${property.address} in cooldown: ${swipesSinceDisliked}/${cooldownSwipes} swipes since disliked`);
+              return false;
+            } else {
+              console.log(`Property ${property.address} cooldown expired: ${swipesSinceDisliked}/${cooldownSwipes} swipes since disliked`);
+              return true;
+            }
+          });
+          
+          console.log(`Pre-filtered out ${mapped.length - filteredProperties.length} disliked properties (including ${cooldownSwipes}-swipe cooldown)`);
+        }
+        
+        // Sort properties by match score if user metric is available
+        let sortedProperties = filteredProperties;
+        if (currentUserMetric && currentUserMetric.currentMetric) {
+          console.log('Sorting initial properties by user match metric:', currentUserMetric.currentMetric);
+          sortedProperties = sortPropertiesByMatchScore(currentUserMetric.currentMetric, filteredProperties);
+          console.log(`Sorted ${sortedProperties.length} properties by match score`);
+        } else {
+          console.log('No user match metric available for initial sorting');
+        }
+        
+        // When loading data with filters, we reset the current index and replace the entire deck
+        // IMPORTANT: Only set the state AFTER all filtering is complete
+        setCurrentIndex(0);
+        setAllListings(mapped);
+        setCurrentDeckWithProtection(sortedProperties);
+        
+        // If we have no properties after filtering, add a placeholder
+        if (sortedProperties.length === 0) {
+          setCurrentDeck([{ isPlaceholder: true }]);
+        }
+        
+        // If there are more properties, start loading them in the background
+        if (result.pagination && result.pagination.hasMoreProperties && result.pagination.nextPageToken) {
+          console.log('Starting background loading of additional properties...');
+          // Add a small delay before starting background loading to ensure UI is responsive
+          setTimeout(() => {
+            loadMorePropertiesInBackground(result.pagination.nextPageToken, filtersToUse, mapped.length);
+          }, 500);
+        }
+        
+        setIsLoading(false);
+      } catch (error) {
+        console.error('Error loading data with filters:', error);
+        setIsLoading(false);
+        setCurrentDeck([{ isPlaceholder: true }]);
+      }
+    }
+
+    // Start the check for active filters
+    checkForActiveFilter();
+    
+    // Check if the user has seen the tutorial
+    checkTutorialStatus();
+    
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadUserMatchMetric, checkTutorialStatus]);
+
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('focus', () => {
+      if (!filters.hasBeenSet) {
+        const defaultFilters = {
+          screen: 'home',
+          priceRange: { min: 0, max: 2000000 },
+          beds: [],
+          baths: [],
+          sqft: { min: 0, max: 10000 },
+          yearBuilt: { min: 1900, max: 2024 },
+          homeType: [],
+          hasBeenSet: false
+        };
+        setFilters(defaultFilters);
+        setCurrentDeck(allListings);
+      }
+    });
+    return unsubscribe;
+  }, [navigation, allListings, filters.hasBeenSet]);
+
+  // Fix for the setTimeout in useEffect
+  useEffect(() => {
+    const handleAnimationStart = () => {
+      setOverlayOpacity(new Animated.Value(1));
+      setHeartScale(new Animated.Value(0.3));
+      setParticles([...Array(12)].map(() => ({
+        x: new Animated.Value(0),
+        y: new Animated.Value(0),
+        scale: new Animated.Value(0),
+        alpha: new Animated.Value(0),
+      })));
+      
+      Animated.parallel([
+        Animated.timing(heartScale, {
+          toValue: 1,
+          duration: 500,
+          useNativeDriver: true,
+        }),
+        ...particles.map((particle, i) => {
+          const angle = (i / particles.length) * 2 * Math.PI;
+          const distance = 100 + Math.random() * 50;
+          
+          return Animated.parallel([
+            Animated.timing(particle.x, {
+              toValue: Math.cos(angle) * distance,
+              duration: 800,
+              useNativeDriver: true,
+            }),
+            Animated.timing(particle.y, {
+              toValue: Math.sin(angle) * distance,
+              duration: 800,
+              useNativeDriver: true,
+            }),
+            Animated.timing(particle.scale, {
+              toValue: Math.random() * 0.8 + 0.2,
+              duration: 800,
+              useNativeDriver: true,
+            }),
+            Animated.sequence([
+              Animated.timing(particle.alpha, {
+                toValue: Math.random() * 0.8 + 0.2,
+                duration: 400,
+                useNativeDriver: true,
+              }),
+              Animated.timing(particle.alpha, {
+                toValue: 0,
+                duration: 400,
+                useNativeDriver: true,
+              }),
+            ]),
+          ]);
+        }),
+      ]).start();
+      
+      setTimeout(() => {
+        Animated.timing(overlayOpacity, {
+          toValue: 0,
+          duration: 500,
+          useNativeDriver: true,
+        }).start(() => {
+          setOverlayIcon(null);
+        });
+      }, 800);
+    };
+    
+    if (overlayIcon) {
+      handleAnimationStart();
+    }
+  }, [overlayOpacity, particles, heartScale]);
+
+  // Conditional rendering for loading state
+  if (isLoading) {
+    return <LoadingCards />;
+  }
+
+  // 7) Render the component
+  return (
+    <TouchableOpacity activeOpacity={1} onPress={handleInteraction} style={styles.container}>
+      {/* Header */}
+      <View style={styles.header}>
+        <View style={styles.logoContainer}>
+          <Image source={require('../../assets/Homerunnhousecolorlogo.png')} style={styles.logo} />
+          <Text style={styles.logoText}>HOMERUNN</Text>
+        </View>
+        <View style={styles.headerIcons}>
+          <TouchableOpacity 
+            style={[
+              styles.actionButton, 
+              styles.redoButton
+            ]} 
+            onPress={handleRedo}
+            disabled={isUndoInProgress || cardCategories.passedCards.length === 0}
+          >
+            <Ionicons 
+              name="refresh" 
+              size={24} 
+              color={(isUndoInProgress || cardCategories.passedCards.length === 0) ? '#ccc' : 'black'} 
+            />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.bellButton} onPress={() => console.log('Bell icon pressed')}>
+            <FontAwesome name="bell-o" size={20} color="black" />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => setIsFilterModalVisible(true)} style={styles.filterButton}>
+            <Ionicons name="filter" size={24} color="black" />
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* Swiper */}
+      <View style={styles.swiperContainer}>
+        <Swiper
+          cards={currentDeck}
+          renderCard={(card) => {
+            if (!card) {
+              return (
+                <View style={[styles.card, { justifyContent: 'center', alignItems: 'center' }]}>
+                  <Text style={{ fontSize: 18 }}>No properties</Text>
+                </View>
+              );
+            }
+            if (card.isPlaceholder) {
+              return (
+                <View style={[styles.card, { justifyContent: 'center', alignItems: 'center', backgroundColor: '#f8f9fa' }]}>
+                  <Text style={{ fontSize: 18, textAlign: 'center', padding: 20, color: '#555' }}>
+                    No properties match your filters.
+                  </Text>
+                  <TouchableOpacity style={{ marginTop: 20, padding: 12, backgroundColor: '#ff5a5f', borderRadius: 8 }} onPress={clearFilters}>
+                    <Text style={{ color: 'white', fontWeight: 'bold' }}>Clear Filters</Text>
+                  </TouchableOpacity>
+                </View>
+              );
+            }
+            
+            // Check if this is the card being redone
+            const isRedoCard = redoCardId === card.id;
+            
+            // Use cached images if available for this card
+            const cardImages = cachedCardImages[card.id] || card.images;
+            
+            return (
+              <TouchableOpacity
+                style={styles.card}
+                onPress={() => {
+                  navigation.navigate('PropertyImages', { property: card, sourceScreen: 'Home' });
+                }}
+                activeOpacity={1}
+              >
+                {/* Apply the fade animation to the entire card including images */}
+                <Animated.View 
+                  style={{ 
+                    opacity: isRedoCard ? redoCardOpacity : 1,
+                    width: '100%',
+                    height: '100%'
+                  }}
+                >
+                  <View style={styles.imageContainer}>
+                    {cardImages && cardImages.length > 0 ? (
+                      <View style={styles.imageGrid}>
+                        {/* First image (top third) */}
+                        <Image 
+                          source={typeof cardImages[0] === 'number' ? cardImages[0] : { uri: cardImages[0].uri }} 
+                          style={styles.stackedImage} 
+                          resizeMode="cover" 
+                        />
+                        
+                        {/* Second image (middle third) */}
+                        {cardImages.length > 1 ? (
+                          <Image 
+                            source={typeof cardImages[1] === 'number' ? cardImages[1] : { uri: cardImages[1].uri }} 
+                            style={styles.stackedImage} 
+                            resizeMode="cover" 
+                          />
+                        ) : (
+                          <Image 
+                            source={require('../../assets/house1.jpeg')} 
+                            style={styles.stackedImage} 
+                            resizeMode="cover" 
+                          />
+                        )}
+                        
+                        {/* Third image (bottom third) */}
+                        {cardImages.length > 2 ? (
+                          <Image 
+                            source={typeof cardImages[2] === 'number' ? cardImages[2] : { uri: cardImages[2].uri }} 
+                            style={styles.stackedImage} 
+                            resizeMode="cover" 
+                          />
+                        ) : (
+                          <Image 
+                            source={require('../../assets/house1.jpeg')} 
+                            style={styles.stackedImage} 
+                            resizeMode="cover" 
+                          />
+                        )}
+                      </View>
+                    ) : (
+                      <View style={styles.imageGrid}>
+                        <Image 
+                          source={require('../../assets/house1.jpeg')} 
+                          style={styles.stackedImage} 
+                          resizeMode="cover" 
+                        />
+                        <Image 
+                          source={require('../../assets/house1.jpeg')} 
+                          style={styles.stackedImage} 
+                          resizeMode="cover"
+                        />
+                        <Image 
+                          source={require('../../assets/house1.jpeg')} 
+                          style={styles.stackedImage} 
+                          resizeMode="cover"
+                        />
+                      </View>
+                    )}
+                    
+                    {/* Display listing status badge if available */}
+                    {card.listingStatus && (
+                      <View style={[styles.statusBadge, { backgroundColor: getStatusColor(card.listingStatus) }]}>
+                        <Text style={styles.statusText}>{card.listingStatus}</Text>
+                      </View>
+                    )}
+                  </View>
+                  <View style={styles.cardDetails}>
+                    <Text style={styles.price}>{formatPrice(card.price)}</Text>
+                    <View style={styles.detailsContainer}>
+                      <View style={styles.detailItem}>
+                        <MaterialCommunityIcons name="bed-outline" size={16} color="#333" />
+                        <Text style={styles.details}>{card.beds} bed</Text>
+                      </View>
+                      <View style={styles.detailItem}>
+                        <MaterialCommunityIcons name="shower" size={16} color="#333" />
+                        <Text style={styles.details}>{card.baths} bath</Text>
+                      </View>
+                      <View style={styles.detailItem}>
+                        <MaterialCommunityIcons name="ruler-square" size={16} color="#333" />
+                        <Text style={styles.details}>{card.sqft.toLocaleString()} sq ft</Text>
+                      </View>
+                    </View>
+                    <Text style={styles.address}>{card.address}</Text>
+                    <View style={styles.bottomRow}>
+                      {card.yearBuilt !== 'N/A' && (
+                        <Text style={styles.yearBuilt}>Built in {card.yearBuilt}</Text>
+                      )}
+                      <Text style={styles.brokerageText}>
+                        {card.listingOffice || 'MLS Listing'}
+                      </Text>
+                    </View>
+                    
+                    {/* Display match score if available */}
+                    {userMatchMetric && userMatchMetric.currentMetric && card.propertyMatchMetric && (
+                      <View style={styles.matchScoreContainer}>
+                        <Text style={styles.matchScoreLabel}>Match Score:</Text>
+                        <Text style={styles.matchScoreValue}>
+                          {Math.min(100, Math.round(calculateMatchScore(userMatchMetric.currentMetric, card.propertyMatchMetric) * 100 / 150))}%
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                </Animated.View>
+              </TouchableOpacity>
+            );
+          }}
+          stackSize={3}
+          backgroundColor="transparent"
+          cardVerticalMargin={0}
+          cardHorizontalMargin={width * 0.04}
+          marginBottom={BOTTOM_PADDING}
+          marginTop={20}
+          onSwipedLeft={(cardIndex) => handleSwipe(cardIndex, 'left')}
+          onSwipedRight={(cardIndex) => handleSwipe(cardIndex, 'right')}
+          onSwipedTop={(cardIndex) => handleSwipe(cardIndex, 'top')}
+          disableBottomSwipe
+          disableTopSwipe={false}
+          cardIndex={0}
+          stackAnimationFriction={10}
+          stackAnimationTension={20}
+          stackSeparation={14}
+          outputRotationRange={["-10deg", "0deg", "10deg"]}
+          overlayLabels={{
+            left: {
+              title: '×',
+              style: {
+                label: {
+                  backgroundColor: 'transparent',
+                  borderColor: 'transparent',
+                  color: '#fff',
+                  fontSize: height * 0.2,
+                  borderWidth: 0,
+                  position: 'absolute',
+                  zIndex: 10
+                },
+                wrapper: {
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  height: CARD_HEIGHT,
+                  borderRadius: 10,
+                  overflow: 'hidden',
+                  backgroundColor: 'rgba(0,0,0,0.3)',
+                  zIndex: 5
+                }
+              }
+            },
+            right: {
+              title: '✓',
+              style: {
+                label: {
+                  backgroundColor: 'transparent',
+                  borderColor: 'transparent',
+                  color: '#fff',
+                  fontSize: height * 0.2,
+                  borderWidth: 0,
+                  position: 'absolute',
+                  zIndex: 10
+                },
+                wrapper: {
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  height: CARD_HEIGHT,
+                  borderRadius: 10,
+                  overflow: 'hidden',
+                  backgroundColor: 'rgba(0,0,0,0.3)',
+                  zIndex: 5
+                }
+              }
+            },
+            top: {
+              title: '♥',
+              style: {
+                label: {
+                  backgroundColor: 'transparent',
+                  borderColor: 'transparent',
+                  color: '#fff',
+                  fontSize: height * 0.2,
+                  borderWidth: 0,
+                  position: 'absolute',
+                  zIndex: 10
+                },
+                wrapper: {
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  height: CARD_HEIGHT,
+                  borderRadius: 10,
+                  overflow: 'hidden',
+                  backgroundColor: 'rgba(0,0,0,0.3)',
+                  zIndex: 5
+                }
+              }
+            }
+          }}
+          overlayLabelStyle={{
+            fontSize: height * 0.2,
+            color: '#fff',
+            fontWeight: 'bold'
+          }}
+          animateOverlayLabelsOpacity
+          overlayOpacityHorizontalThreshold={width / 15}
+          overlayOpacityVerticalThreshold={height / 15}
+          inputOverlayLabelsOpacityRangeX={[-width / 5, -width / 10, 0, width / 10, width / 5]}
+          inputOverlayLabelsOpacityRangeY={[-height / 5, -height / 10, 0, height / 10, height / 5]}
+          outputOverlayLabelsOpacityRangeX={[0.8, 0.4, 0, 0.4, 0.8]}
+          outputOverlayLabelsOpacityRangeY={[0.8, 0.4, 0, 0.4, 0.8]}
+          overlayOpacityReverse={false}
+          swipeAnimationDuration={350}
+          animateCardOpacity={false}
+          useViewOverflow
+          containerStyle={{
+            backgroundColor: 'transparent',
+            paddingHorizontal: width * 0.02
+          }}
+          cardStyle={{
+            position: 'absolute',
+            top: 0,
+            width: width * 0.92
+          }}
+        />
+      </View>
+
+      {/* Heart Overlay */}
+      {showHeartOverlay && (
+        <Animated.View style={[styles.overlay, { opacity: overlayOpacity }]}>
+          <Animated.View style={{ transform: [{ scale: heartScale }] }}>
+            <Text style={styles.heartSymbol}>{overlayIcon}</Text>
+          </Animated.View>
+        </Animated.View>
+      )}
+
+      {/* Filter Modal */}
+      <FilterModal
+        visible={isFilterModalVisible}
+        onClose={() => setIsFilterModalVisible(false)}
+        onApply={(newFilters) => {
+          setFilters({ ...newFilters, screen: 'home' });
+          applyFilters(newFilters);
+          setIsFilterModalVisible(false);
+        }}
+        onClear={() => {
+          const defaultFilters = {
+            screen: 'home',
+            priceRange: { min: 0, max: 2000000 },
+            beds: [],
+            baths: [],
+            sqft: { min: 0, max: 10000 },
+            yearBuilt: { min: 1900, max: 2024 },
+            homeType: [],
+            hasBeenSet: false
+          };
+          setFilters(defaultFilters);
+          setCurrentIndex(0);
+          setCurrentDeck(allListings);
+          setIsFilterModalVisible(false);
+        }}
+        currentFilters={filters}
+        screen="home"
+      />
+
+      {/* Swipe Tutorial */}
+      <SwipeTutorial
+        visible={showTutorial}
+        onDismiss={() => {
+          setShowTutorial(false);
+          setHasInteracted(true);
+        }}
+      />
+    </TouchableOpacity>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#fff'
+  },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingTop: HEADER_HEIGHT - 30,
+    paddingBottom: 16,
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#ddd'
+  },
+  logoContainer: {
+    flexDirection: 'row',
+    alignItems: 'center'
+  },
+  logo: {
+    width: 28,
+    height: 28,
+    marginRight: 8
+  },
+  logoText: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#fc565b'
+  },
+  headerIcons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginRight: 8
+  },
+  bellButton: {
+    marginHorizontal: 6
+  },
+  redoButton: {
+    marginHorizontal: 6
+  },
+  filterButton: {
+    marginHorizontal: 6
+  },
+  swiperContainer: {
+    flex: 1,
+    paddingTop: height * 0.01,
+    paddingBottom: height * 0.01,
+    backgroundColor: '#fff'
+  },
+  card: {
+    backgroundColor: '#fff',
+    borderRadius: 10,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: '#ddd',
+    elevation: 3,
+    height: CARD_HEIGHT,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8
+  },
+  imageContainer: {
+    height: '82%',
+    flexDirection: 'column'
+  },
+  imageGrid: {
+    flexDirection: 'column',
+    height: '100%',
+    width: '100%',
+  },
+  stackedImage: {
+    width: '100%',
+    height: '33.33%',
+    resizeMode: 'cover',
+  },
+  cardDetails: {
+    flex: 1,
+    padding: 8,
+    paddingHorizontal: 12,
+    justifyContent: 'space-between',
+    backgroundColor: 'rgba(245, 247, 250, 0.95)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 6
+  },
+  price: {
+    fontSize: height * 0.035,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 1
+  },
+  detailsContainer: {
+    flexDirection: 'row',
+    justifyContent: 'flex-start',
+    alignItems: 'center'
+  },
+  detailItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginRight: 12
+  },
+  details: {
+    fontSize: height * 0.024,
+    color: '#333',
+    fontWeight: '600',
+    marginLeft: 4
+  },
+  address: {
+    fontSize: height * 0.021,
+    color: '#333'
+  },
+  overlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.3)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1000
+  },
+  heartSymbol: {
+    fontSize: height * 0.15,
+    color: '#FFFFFF',
+    fontWeight: 'bold'
+  },
+  statusBadge: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    width: 100,
+    height: 28,
+    padding: 4,
+    borderRadius: 4,
+    justifyContent: 'center',
+    alignItems: 'center'
+  },
+  statusText: {
+    fontSize: height * 0.018,
+    fontWeight: 'bold',
+    color: '#fff',
+    textAlign: 'center'
+  },
+  bottomRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 4
+  },
+  yearBuilt: {
+    fontSize: height * 0.018,
+    color: '#666',
+    flex: 1,
+    marginRight: 8
+  },
+  brokerageText: {
+    fontSize: height * 0.018,
+    color: '#666',
+    fontStyle: 'italic',
+    textAlign: 'right'
+  },
+  imageDots: {
+    position: 'absolute',
+    bottom: 10,
+    left: 10,
+    flexDirection: 'row',
+    alignItems: 'center'
+  },
+  imageDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#fff',
+    marginHorizontal: 2
+  },
+  skeletonCardsContainer: {
+    position: 'relative',
+    justifyContent: 'center',
+    alignItems: 'center',
+    height: CARD_HEIGHT,
+    width: width * 0.92,
+    marginTop: 30
+  },
+  skeletonCard: {
+    position: 'absolute',
+    width: width * 0.92,
+    height: CARD_HEIGHT,
+    backgroundColor: '#fff',
+    borderRadius: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 1.5,
+    elevation: 2,
+    overflow: 'hidden'
+  },
+  skeletonCardBottom: {
+    transform: [
+      { scale: 0.9 },
+      { translateY: 20 }
+    ],
+    zIndex: 1
+  },
+  skeletonCardMiddle: {
+    transform: [
+      { scale: 0.95 },
+      { translateY: 10 }
+    ],
+    zIndex: 2
+  },
+  skeletonCardTop: {
+    zIndex: 3
+  },
+  skeletonImageContainer: {
+    height: CARD_HEIGHT * 0.6,
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 10,
+    borderTopRightRadius: 10,
+    overflow: 'hidden',
+    padding: 5
+  },
+  skeletonImageRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    height: '100%'
+  },
+  skeletonMainImage: {
+    width: '60%',
+    height: '100%',
+    backgroundColor: '#f0f0f0',
+    borderRadius: 5,
+    marginRight: 5
+  },
+  skeletonSecondaryImagesContainer: {
+    width: '38%',
+    height: '100%',
+    flexDirection: 'column',
+    justifyContent: 'space-between'
+  },
+  skeletonSecondaryImage: {
+    width: '100%',
+    height: '48%',
+    backgroundColor: '#f0f0f0',
+    borderRadius: 5
+  },
+  skeletonDetails: {
+    flex: 1,
+    padding: 15
+  },
+  skeletonPrice: {
+    height: 30,
+    width: '50%',
+    backgroundColor: '#f0f0f0',
+    borderRadius: 4,
+    marginBottom: 15
+  },
+  skeletonDetailsRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-start',
+    alignItems: 'center',
+    marginBottom: 15
+  },
+  skeletonDetailItem: {
+    width: 70,
+    height: 24,
+    backgroundColor: '#f0f0f0',
+    borderRadius: 4,
+    marginRight: 15
+  },
+  skeletonAddress: {
+    height: 18,
+    width: '85%',
+    backgroundColor: '#f0f0f0',
+    borderRadius: 4,
+    marginBottom: 8
+  },
+  skeletonYearBuilt: {
+    height: 18,
+    width: '40%',
+    backgroundColor: '#f0f0f0',
+    borderRadius: 4
+  },
+  skeletonStatusBadge: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    width: 70,
+    height: 24,
+    backgroundColor: '#f0f0f0',
+    padding: 4,
+    borderRadius: 4
+  },
+  matchScoreContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#eee'
+  },
+  matchScoreLabel: {
+    fontSize: 14,
+    color: '#666',
+    marginRight: 4
+  },
+  matchScoreValue: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#fc565b'
+  },
+  disabledButton: {
+    opacity: 0.5
+  }
+});
+
+export default HomeScreen;

@@ -11,10 +11,20 @@ export const SavedPropertiesProvider = ({ children }) => {
       if (existingPropertyIndex !== -1) {
         // Update the existing property with the new loved status
         const updatedProperties = [...prev];
-        updatedProperties[existingPropertyIndex] = { ...property };
+        updatedProperties[existingPropertyIndex] = { 
+          ...updatedProperties[existingPropertyIndex],
+          ...property,
+          loved: property.loved !== undefined ? property.loved : updatedProperties[existingPropertyIndex].loved
+        };
         return updatedProperties;
       }
-      return [...prev, property];
+      // Add new properties at the beginning (most recent first)
+      // Ensure loved status is explicitly set
+      const newProperty = {
+        ...property,
+        loved: property.loved !== undefined ? property.loved : false
+      };
+      return [newProperty, ...prev];
     });
   };
 

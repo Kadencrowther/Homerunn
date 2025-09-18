@@ -1,455 +1,1557 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, Image, TouchableOpacity, Animated, Dimensions, Vibration, Easing } from 'react-native';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { 
+  View, Text, StyleSheet, Image, TouchableOpacity, 
+  Animated, Dimensions, Vibration, Platform, StatusBar, ScrollView, ActivityIndicator 
+} from 'react-native';
 import Swiper from 'react-native-deck-swiper';
-import { Ionicons } from '@expo/vector-icons'; // Assuming you're using Expo for icons
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { FontAwesome } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
-import FilterModal from '../../src/components/FilterModal';
-import { useSavedProperties } from '../../src/context/SavedPropertiesContext';
-import { formatPrice } from '../../src/utils/formatters';
-import SwipeTutorial from '../../src/components/SwipeTutorial';
+import FilterModal from '../components/FilterModal';
+import { useSavedProperties } from '../context/SavedPropertiesContext';
+import { formatPrice } from '../utils/formatters';
+import SwipeTutorial from '../components/SwipeTutorial';
+import { auth, db } from '../config/firebase';
+import { doc, setDoc, getDoc, collection, getDocs, query, where } from 'firebase/firestore';
+import { fetchMLSData, fetchMoreMLSData } from '../api/fetchMLSData';
+import ShimmerEffect from '../components/ShimmerEffect';
+import ShimmerCards from '../components/ShimmerCards';
+import LoadingCards from '../components/LoadingCards';
+import PlaceholderImage from '../components/PlaceholderImage';
+import NotificationDropdown from '../components/NotificationDropdown';
+import { getUserMatchMetric, updateUserMatchMetric, processPropertiesForUser, sortPropertiesByMatchScore, calculateMatchScore, getUserSwipeCount } from '../utils/UserMatchMetric';
+import { getPropertyMatchMetric } from '../utils/PropertyMatchMetric';
 
-// Get screen dimensions
+// Screen dimensions
 const { width, height } = Dimensions.get('window');
 
-// Example data for properties (expanded to 5 properties)
-const properties = [
-  {
-    id: '1',
-    images: [
-      require('../../assets/house1.jpeg'),
-      require('../../assets/house1.jpeg'),
-    ],
-    price: 749000,  // Changed to number for easier filtering
-    beds: 5,
-    baths: 4,
-    sqft: 3890,
-    details: '5 bed • 4 bath • 3,890 sq ft',
-    address: '1850 South 1600 West, Lehi, UT 84660',
-  },
-  {
-    id: '2',
-    images: [
-      require('../../assets/house2.jpeg'),
-      require('../../assets/house2.jpeg'),
-    ],
-    price: 1129000,
-    beds: 5,
-    baths: 4,
-    sqft: 5000,
-    details: '5 bed • 4 bath • 5,000 sq ft',
-    address: '456 Oak Dr, Austin, TX',
-  },
-  {
-    id: '3',
-    images: [
-      require('../../assets/house3.jpeg'),
-      require('../../assets/house3.jpeg'),
-    ],
-    price: 899000,
-    beds: 4,
-    baths: 3,
-    sqft: 3200,
-    details: '4 bed • 3 bath • 3,200 sq ft',
-    address: '789 Pine Lane, Salt Lake City, UT',
-  },
-  {
-    id: '4',
-    images: [
-      require('../../assets/house4.jpeg'),
-      require('../../assets/house4.jpeg'),
-    ],
-    price: 1450000,
-    beds: 6,
-    baths: 5,
-    sqft: 4500,
-    details: '6 bed • 5 bath • 4,500 sq ft',
-    address: '321 Maple Ave, Draper, UT',
-  },
-  {
-    id: '5',
-    images: [
-      require('../../assets/house5.jpeg'),
-      require('../../assets/house5.jpeg'),
-    ],
-    price: 679000,
-    beds: 4,
-    baths: 3,
-    sqft: 2800,
-    details: '4 bed • 3 bath • 2,800 sq ft',
-    address: '567 Elm Street, Sandy, UT',
-  },
-  {
-    id: '6',
-    images: [
-      require('../../assets/house6.jpeg'),
-      require('../../assets/house6.jpeg'),
-    ],
-    price: 1350000,
-    beds: 6,
-    baths: 4,
-    sqft: 4800,
-    details: '6 bed • 4 bath • 4,800 sq ft',
-    address: '2234 Highland Drive, Holladay, UT 84124',
-  },
-  {
-    id: '7',
-    images: [
-      require('../../assets/house7.jpeg'),
-      require('../../assets/house7.jpeg'),
-    ],
-    price: 875000,
-    beds: 4,
-    baths: 3,
-    sqft: 3500,
-    details: '4 bed • 3 bath • 3,500 sq ft',
-    address: '943 East 900 South, Salt Lake City, UT 84105',
-  },
-  {
-    id: '8',
-    images: [
-      require('../../assets/house8.jpeg'),
-      require('../../assets/house8.jpeg'),
-    ],
-    price: 1750000,
-    beds: 7,
-    baths: 5,
-    sqft: 6500,
-    details: '7 bed • 5 bath • 6,500 sq ft',
-    address: '1122 South Temple, Salt Lake City, UT 84102',
-  },
-  {
-    id: '9',
-    images: [
-      require('../../assets/house9.jpeg'),
-      require('../../assets/house9.jpeg'),
-    ],
-    price: 950000,
-    beds: 5,
-    baths: 3,
-    sqft: 4100,
-    details: '5 bed • 3 bath • 4,100 sq ft',
-    address: '3456 Walker Lane, Sandy, UT 84093',
-  },
-];
+// Layout constants for the Swiper cards
+const HEADER_HEIGHT = Platform.OS === 'ios' ? 90 : (StatusBar.currentHeight + 60);
+const TAB_BAR_HEIGHT = Platform.OS === 'ios' ? 83 : 60;
+const CARD_MARGIN = 10;
+const BOTTOM_PADDING = 25;
+const CARD_HEIGHT = height - HEADER_HEIGHT - TAB_BAR_HEIGHT - (CARD_MARGIN * 2) - BOTTOM_PADDING;
 
 const HomeScreen = () => {
   const navigation = useNavigation();
+
+  // Add this function to determine badge color based on status
+  const getStatusColor = (status) => {
+    if (status === 'Active') return '#fc565b';  // Red
+    if (status === 'Pending') return '#FFA500'; // Orange
+    if (status === 'Sold') return '#4CAF50';    // Green
+    if (status === 'Closed') return '#1652F0';  // Blue
+    return '#888888'; // Default gray for other statuses
+  };
+
+  // 1) Manage MLS data
+  const [allListings, setAllListings] = useState([]);    // Entire set from Cloud Function
+  const [currentDeck, setCurrentDeck] = useState([]);      // Currently displayed deck (filtered)
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Add state for pagination
+  const [paginationInfo, setPaginationInfo] = useState({
+    hasMoreProperties: false,
+    nextPageToken: null,
+    currentPage: 1,
+    totalFetched: 0
+  });
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [currentFilters, setCurrentFilters] = useState(null);
+
+  // 2) Other states & logic
   const [overlayOpacity] = useState(new Animated.Value(0));
+  const [showHeartOverlay, setShowHeartOverlay] = useState(false);
+  const heartScale = useState(new Animated.Value(0))[0];
+  const [particles] = useState([...Array(8)].map(() => new Animated.ValueXY({ x: 0, y: 0 })));
   const [overlayIcon, setOverlayIcon] = useState(null);
-  const [swipedCards, setSwipedCards] = useState([]); // Stack of swiped cards
-  const [currentIndex, setCurrentIndex] = useState(0); // Track current card index
-  const [currentDeck, setCurrentDeck] = useState([...properties]); // Current deck of cards
+  const [swipedCards, setSwipedCards] = useState([]);
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const { addToSaved, removeFromSaved } = useSavedProperties();
+
   const [isFilterModalVisible, setIsFilterModalVisible] = useState(false);
   const [filters, setFilters] = useState({
+    screen: 'home',
     priceRange: { min: 0, max: 2000000 },
     beds: [],
     baths: [],
-    sqft: { min: 0, max: 10000 }
+    sqft: { min: 0, max: 10000 },
+    yearBuilt: { min: 1900, max: 2024 },
+    homeType: [],
+    hasBeenSet: false
   });
-  const { addToSaved, removeFromSaved } = useSavedProperties();
+
+  // Only one declaration for showTutorial and hasInteracted
   const [showTutorial, setShowTutorial] = useState(false);
   const [hasInteracted, setHasInteracted] = useState(false);
-  const [showStarOverlay, setShowStarOverlay] = useState(false);
-  const starScale = useState(new Animated.Value(0))[0];
-  const [particles] = useState([...Array(8)].map(() => new Animated.ValueXY({ x: 0, y: 0 })));
 
-  useEffect(() => {
-    if (!hasInteracted) {
-      const timer = setTimeout(() => {
-        if (!hasInteracted) {
-          setShowTutorial(true);
-        }
-      }, 4000);
+  // First, add a state to track if filters have been applied
+  const [filtersApplied, setFiltersApplied] = useState(false);
 
-      return () => clearTimeout(timer);
-    }
-  }, [hasInteracted]);
+  // Add state variables for user match metrics
+  const [userMatchMetric, setUserMatchMetric] = useState(null);
+  const [dislikedProperties, setDislikedProperties] = useState([]);
+  const [likedProperties, setLikedProperties] = useState([]);
+  const [lovedProperties, setLovedProperties] = useState([]);
 
-  const handleInteraction = () => {
-    if (!hasInteracted) {
-      setHasInteracted(true);
-    }
-    if (showTutorial) {
-      setShowTutorial(false);
-    }
-  };
+  // Add this state to track if an undo operation is in progress
+  const [isUndoInProgress, setIsUndoInProgress] = useState(false);
 
-  const animateStarWithParticles = () => {
-    // Reset values
-    starScale.setValue(0);
-    particles.forEach(particle => particle.setValue({ x: 0, y: 0 }));
+  // Add this new state for the fade-in animation
+  const [redoCardId, setRedoCardId] = useState(null);
+  const [redoCardOpacity] = useState(new Animated.Value(1));
+
+  // Add this state to store cached images for redone cards
+  const [cachedCardImages, setCachedCardImages] = useState({});
+
+  // Add this state to track when a redo operation is in progress
+  const [redoInProgress, setRedoInProgress] = useState(false);
+
+  // Add these new state variables to track different card categories
+  const [cardCategories, setCardCategories] = useState({
+    passedCards: [], // Cards that have been swiped (limited history)
+    redoCard: null,  // Currently redone card (if any)
+    activeCard: null, // Current top card
+    onDeckCards: [], // Next 3 cards that will become active (should remain stable)
+    futureCards: []  // Cards that can be safely reordered
+  });
+
+  // Define the number of cards to keep stable in the deck
+  const STABLE_DECK_SIZE = 5; // Active card + 5 cards on deck
+  
+  // Add a new state to track the stable deck separately from future cards
+  const [stableDeck, setStableDeck] = useState([]);
+  const [futureDeck, setFutureDeck] = useState([]);
+
+  // Add state to track if we're polling for filters
+  const [isPollingForFilters, setIsPollingForFilters] = useState(false);
+
+  // Add state for notification dropdown
+  const [showNotificationDropdown, setShowNotificationDropdown] = useState(false);
+
+  // Add state to track if HomeScreen has been initialized
+  const [hasBeenInitialized, setHasBeenInitialized] = useState(false);
+
+  // 4) Define all functions BEFORE any conditional returns
+  // Use useCallback to prevent unnecessary re-renders
+  const animateHeart = useCallback(() => {
+    // Show the heart overlay
+    setShowHeartOverlay(true);
+    setOverlayIcon('♥');
     
-    // Keep the same expansion config
-    const expansionConfig = {
-      friction: 35,
-      tension: 450,
-      useNativeDriver: true
-    };
-    
-    // Modified contraction config for more controlled movement
-    const contractionConfig = {
-      friction: 25,  // Increased from 18 for more damping
-      tension: 120,  // Reduced from 180 for slower movement
-      restSpeedThreshold: 0.001, // Lower threshold for more precise ending
-      restDisplacementThreshold: 0.001,
-      velocity: 0.3,  // Reduced from 0.5 for slower initial velocity
-      useNativeDriver: true
-    };
-    
-    // Create particle animations
-    const particleAnimations = particles.map((particle, index) => {
-      const angle = (index * Math.PI * 2) / particles.length;
-      const distance = 120;
-      
-      return Animated.sequence([
-        // Expansion
-        Animated.spring(particle, {
-          toValue: {
-            x: Math.cos(angle) * distance,
-            y: Math.sin(angle) * distance
-          },
-          ...expansionConfig
-        }),
-        // Contraction
-        Animated.spring(particle, {
-          toValue: { x: 0, y: 0 },
-          ...contractionConfig
-        })
-      ]);
-    });
-
-    // Star animation using exact same timing configuration
-    const starAnimation = Animated.sequence([
-      // Expansion - matched with particles
-      Animated.spring(starScale, {
-        toValue: 1.4,
-        ...expansionConfig
-      }),
-      // Contraction - matched with particles
-      Animated.spring(starScale, {
-        toValue: 0.4,
-        ...contractionConfig
-      })
-    ]);
-
-    // Overlay animation
-    const overlayAnimation = Animated.timing(overlayOpacity, {
+    // Animate overlay opacity
+    Animated.timing(overlayOpacity, {
       toValue: 1,
-      duration: 10,
-      useNativeDriver: true,
-    });
-
-    // Run all animations
-    Animated.parallel([
-      overlayAnimation,
-      starAnimation,
-      ...particleAnimations
-    ]).start(() => {
-      // Fade out overlay - even shorter delay and duration
+      duration: 100,
+      useNativeDriver: true
+    }).start();
+    
+    // Animate heart scaling
+    heartScale.setValue(0.1);
+    Animated.sequence([
+      Animated.spring(heartScale, {
+        toValue: 1.2,
+        friction: 4,
+        tension: 40,
+        useNativeDriver: true
+      }),
+      Animated.timing(heartScale, {
+        toValue: 0,
+        duration: 300,
+        delay: 300,
+        useNativeDriver: true
+      })
+    ]).start();
+    
+    // Hide the overlay after animation
+    setTimeout(() => {
       Animated.timing(overlayOpacity, {
         toValue: 0,
-        duration: 1,  // Reduced from 5 to 1
-        delay: 1,     // Reduced from 5 to 1
-        useNativeDriver: true,
-      }).start(() => setShowStarOverlay(false));
-    });
-  };
+        duration: 300,
+        useNativeDriver: true
+      }).start(() => {
+        setShowHeartOverlay(false);
+        setOverlayIcon(null);
+      });
+    }, 800);
+  }, [heartScale, overlayOpacity]);
 
-  const handleSwipe = (cardIndex, direction) => {
-    handleInteraction();
+  const handleInteraction = useCallback(() => {
+    if (!hasInteracted) setHasInteracted(true);
+    if (showTutorial) setShowTutorial(false);
+  }, [hasInteracted, showTutorial]);
+
+  // Add this function to manage the card categories
+  const updateCardCategories = useCallback(() => {
+    if (!currentDeck || currentDeck.length === 0) {
+      setCardCategories(prev => ({
+        ...prev,
+        activeCard: null,
+        onDeckCards: [],
+        futureCards: []
+      }));
+      return;
+    }
     
+    // Make sure currentIndex is within bounds
+    const safeCurrentIndex = Math.min(currentIndex, currentDeck.length - 1);
+    
+    // Get the active card (current index)
+    const activeCard = currentDeck[safeCurrentIndex];
+    
+    // Get the next 5 cards (on deck)
+    const onDeckCards = currentDeck.slice(safeCurrentIndex + 1, safeCurrentIndex + 1 + STABLE_DECK_SIZE);
+    
+    // Get the future cards (beyond the stable deck)
+    const futureCards = currentDeck.slice(safeCurrentIndex + 1 + STABLE_DECK_SIZE);
+    
+    // Update the card categories
+    setCardCategories(prev => ({
+      ...prev,
+      activeCard,
+      onDeckCards,
+      futureCards
+    }));
+  }, [currentDeck, currentIndex, STABLE_DECK_SIZE]);
+
+  // Call this function whenever the deck or current index changes
+  useEffect(() => {
+    updateCardCategories();
+  }, [currentDeck, currentIndex, updateCardCategories]);
+
+  // Modify the setCurrentDeckWithProtection function to handle the stable/future deck separation
+  const setCurrentDeckWithProtection = useCallback((newDeckOrUpdater) => {
+    setCurrentDeck(prevDeck => {
+      // Get the new deck (whether it's a function or direct value)
+      const calculatedNewDeck = typeof newDeckOrUpdater === 'function' 
+        ? newDeckOrUpdater(prevDeck) 
+        : newDeckOrUpdater;
+      
+      // If we're resetting the deck completely (like when applying filters),
+      // don't try to preserve any cards - just return the new deck
+      if (calculatedNewDeck.length > 0 && prevDeck.length === 0) {
+        console.log('Complete deck reset detected - not preserving any cards');
+        return calculatedNewDeck;
+      }
+      
+      // Check if there's a redone card in the current deck that needs protection
+      const redoCardIndex = prevDeck.findIndex(card => 
+        card.isRedoCard || card._redoProtected || card._absoluteProtection || 
+        (redoCardId && card.id === redoCardId)
+      );
+      
+      // If no redone card, just return the new deck
+      if (redoCardIndex === -1) return calculatedNewDeck;
+      
+      // If there is a redone card, make sure it's preserved in the new deck
+      const redoCard = prevDeck[redoCardIndex];
+      console.log(`Preserving redone card at index ${redoCardIndex}: ${redoCard.address}`);
+      
+      // Create a new deck with the redone card preserved at its original position
+      const protectedDeck = [...calculatedNewDeck];
+      
+      // If the redone card is at the current index, make sure it stays there
+      if (redoCardIndex === currentIndex) {
+        protectedDeck[currentIndex] = redoCard;
+        console.log('Protected redone card at current index');
+      } else {
+        // Otherwise, insert it at its original position
+        protectedDeck.splice(redoCardIndex, 0, redoCard);
+        // Remove any duplicate that might have been added
+        const duplicateIndex = protectedDeck.findIndex((card, idx) => 
+          idx !== redoCardIndex && card.id === redoCard.id
+        );
+        if (duplicateIndex !== -1) {
+          protectedDeck.splice(duplicateIndex, 1);
+        }
+        console.log('Protected redone card at its original position');
+      }
+      
+      return protectedDeck;
+    });
+  }, [currentIndex, redoCardId]);
+
+  // Add a new function to update the stable and future decks
+  const updateStableAndFutureDecks = useCallback(() => {
+    setCurrentDeck(prevDeck => {
+      if (!prevDeck || prevDeck.length === 0) {
+        setStableDeck([]);
+        setFutureDeck([]);
+        return prevDeck;
+      }
+      
+      // Make sure we don't go out of bounds
+      const safeCurrentIndex = Math.min(currentIndex, prevDeck.length - 1);
+      
+      // Split the deck into stable and future parts
+      const newStableDeck = prevDeck.slice(safeCurrentIndex, safeCurrentIndex + STABLE_DECK_SIZE);
+      const newFutureDeck = prevDeck.slice(safeCurrentIndex + STABLE_DECK_SIZE);
+      
+      // Log the deck sizes for debugging
+      console.log(`Updating decks: ${newStableDeck.length} stable cards, ${newFutureDeck.length} future cards`);
+      
+      // Update the separate state variables
+      setStableDeck(newStableDeck);
+      setFutureDeck(newFutureDeck);
+      
+      // Return the unchanged deck (we're just updating the separate state variables)
+      return prevDeck;
+    });
+  }, [currentIndex, STABLE_DECK_SIZE]);
+
+  // Call updateStableAndFutureDecks whenever currentIndex or currentDeck changes
+  useEffect(() => {
+    updateStableAndFutureDecks();
+  }, [currentIndex, currentDeck, updateStableAndFutureDecks]);
+
+  // Modify the handleSwipe function to use the stable/future deck concept
+  const handleSwipe = useCallback((cardIndex, direction) => {
+    handleInteraction();
     const swipedCard = currentDeck[cardIndex];
     if (!swipedCard) return;
 
-    if (direction === 'top') {
-      setShowStarOverlay(true);
-      Vibration.vibrate(20);
-      animateStarWithParticles();
+    // Reset the redo in progress state when a new card is swiped
+    setIsUndoInProgress(false);
+    setRedoInProgress(false);
+    
+    // Clear the redoCard from categories
+    setCardCategories(prev => ({
+      ...prev,
+      redoCard: null,
+      // Add the swiped card to passed cards (limited history)
+      passedCards: [...prev.passedCards.slice(-9), { ...swipedCard, swipeDirection: direction }]
+    }));
+    
+    // Clear the redoCardId if this was a redone card
+    if (swipedCard.id === redoCardId || swipedCard.isRedoCard || swipedCard._redoProtected || swipedCard._absoluteProtection) {
+      setRedoCardId(null);
     }
 
-    setSwipedCards(prev => [{
-      ...swipedCard,
-      action: direction,
-      swipeIndex: currentIndex
-    }, ...prev]);
+    // Cache the card's images when it's swiped for potential redo
+    if (swipedCard.images && swipedCard.images.length > 0) {
+      setCachedCardImages(prev => ({
+        ...prev,
+        [swipedCard.id]: swipedCard.images
+      }));
+    }
 
-    setCurrentIndex(prev => prev + 1);
+    // Create a clean version of the card without any redo-specific properties
+    const cleanCard = {...swipedCard};
+    if (cleanCard.isRedoCard) delete cleanCard.isRedoCard;
+    if (cleanCard.redoTimestamp) delete cleanCard.redoTimestamp;
+    if (cleanCard.bypassFiltering) delete cleanCard.bypassFiltering;
+    if (cleanCard.forceDisplay) delete cleanCard.forceDisplay;
+    if (cleanCard.mustNotBeReplaced) delete cleanCard.mustNotBeReplaced;
+    if (cleanCard.redoLock) delete cleanCard.redoLock;
+    if (cleanCard.uniqueRedoId) delete cleanCard.uniqueRedoId;
+    if (cleanCard._redoProtected) delete cleanCard._redoProtected;
+    if (cleanCard._absoluteProtection) delete cleanCard._absoluteProtection;
 
+    // Add the clean card to the swiped cards array for undo functionality
+    setSwipedCards(prev => [...prev, { ...cleanCard, swipeDirection: direction }]);
+    
+    // Update the current index
+    setCurrentIndex(cardIndex + 1);
+    
+    // Handle the swipe action based on direction
     if (direction === 'left') {
-      removeFromSaved(swipedCard.id);
-    } else if (direction === 'right' || direction === 'top') {
-      addToSaved({ ...swipedCard, loved: direction === 'top' });
+      // Dislike - no action needed other than tracking
+      Vibration.vibrate(50);
+      
+      // NEW: If this was a redone card that was previously liked or loved, remove it from saved
+      if (swipedCard.isRedoCard || swipedCard._redoProtected || swipedCard._absoluteProtection) {
+        removeFromSaved(swipedCard.id);
+      }
+    } else if (direction === 'right') {
+      // Like - add to saved properties
+      addToSaved(swipedCard);
+      Vibration.vibrate(50);
+    } else if (direction === 'top') {
+      // Super Like - add to saved properties with a love flag
+      addToSaved({ ...swipedCard, loved: true });
+      animateHeart();
+      Vibration.vibrate([0, 50, 50, 100]);
     }
-  };
-
-  const handleRedo = () => {
-    handleInteraction(); // Dismiss tutorial on redo
-    setHasInteracted(true);
-    setShowTutorial(false);
     
-    if (swipedCards.length === 0) return;
-    
-    const cardToRedo = swipedCards[0];
-    setCurrentDeck(prev => [cardToRedo, ...prev]);
-    setSwipedCards(prev => prev.slice(1));
-    setCurrentIndex(prev => prev - 1);
-  };
-
-  const renderCard = (property) => (
-    <TouchableOpacity
-      style={styles.card}
-      onPress={() => navigation.navigate('PropertyImages', { property })}
-    >
-      <View style={styles.imageContainer}>
-        <Image 
-          source={property.images[0]}
-          style={styles.image}
-          resizeMode="cover"
-        />
-        <Image 
-          source={property.images[1]}
-          style={styles.image}
-          resizeMode="cover"
-        />
-      </View>
-
-      <View style={styles.cardDetails}>
-        <Text style={styles.price}>{formatPrice(property.price)}</Text>
-        <Text style={styles.details}>{property.details}</Text>
-        <Text style={styles.address}>{property.address}</Text>
-      </View>
-    </TouchableOpacity>
-  );
-
-  const applyFilters = (newFilters) => {
-    setFilters(newFilters);
-    
-    // Filter properties based on criteria
-    const filteredProperties = properties.filter(property => {
-      // Price filter
-      const priceInRange = property.price >= newFilters.priceRange.min && 
-                          property.price <= newFilters.priceRange.max;
-      if (!priceInRange) return false;
+    // Update user match metric if user is logged in
+    if (auth.currentUser) {
+      console.log(`Updating user match metric for property: ${swipedCard.id}`);
+      console.log(`Property match metric: ${swipedCard.propertyMatchMetric}`);
       
-      // Beds filter
-      if (newFilters.beds?.length > 0) {
-        const matchesBeds = newFilters.beds.some(bed => {
-          const bedNum = parseInt(bed);
-          if (bed === '5+') return property.beds >= 5;
-          return property.beds === bedNum;
-        });
-        if (!matchesBeds) return false;
+      updateUserMatchMetric(
+        auth.currentUser.uid,
+        swipedCard.id,
+        swipedCard.propertyMatchMetric,
+        direction
+      ).then(updatedMetric => {
+        if (updatedMetric) {
+          console.log('Updated user match metric:', JSON.stringify(updatedMetric));
+          setUserMatchMetric(updatedMetric);
+          setDislikedProperties(updatedMetric.dislikedProperties || []);
+          setLikedProperties(updatedMetric.likedProperties || []);
+          setLovedProperties(updatedMetric.lovedProperties || []);
+          
+          // Only reorder if no redo is in progress
+          if (!redoInProgress && !isUndoInProgress && !cardCategories.redoCard) {
+            // Instead of reordering the entire deck, only reorder the future deck
+            if (futureDeck.length > 0) {
+              console.log(`Reordering ${futureDeck.length} future properties based on updated user metric`);
+              console.log(`Keeping ${STABLE_DECK_SIZE} cards stable in the deck`);
+              
+              // Process and sort only the future cards
+              const reorderedFutureCards = processPropertiesForUser(
+                updatedMetric.currentMetric,
+                futureDeck,
+                updatedMetric.dislikedProperties,
+                false,
+                100
+              );
+              
+              // Sort the reordered future cards
+              const sortedFutureCards = sortPropertiesByMatchScore(
+                updatedMetric.currentMetric,
+                reorderedFutureCards
+              );
+              
+              // Update the future deck
+              setFutureDeck(sortedFutureCards);
+              
+              // Update the current deck by combining stable and future decks
+              setCurrentDeckWithProtection(prev => {
+                // Get the current stable deck (it might have changed since the last update)
+                const currentStableDeck = prev.slice(currentIndex, currentIndex + STABLE_DECK_SIZE);
+                
+                // Get all cards before the current index (already swiped)
+                const previousCards = prev.slice(0, currentIndex);
+                
+                // Combine everything: previous cards + stable deck + sorted future cards
+                const newDeck = [...previousCards, ...currentStableDeck, ...sortedFutureCards];
+                
+                console.log(`Updated deck after swipe: ${previousCards.length} previous cards + ${currentStableDeck.length} stable cards + ${sortedFutureCards.length} reordered future cards`);
+                
+                return newDeck;
+              });
+            } else {
+              console.log('No future cards to reorder');
+              
+              // Check if we need to load more properties
+              if (paginationInfo && paginationInfo.hasMoreProperties && paginationInfo.nextPageToken) {
+                console.log('Loading more properties since we have no future cards');
+                loadMorePropertiesInBackground(paginationInfo.nextPageToken, currentFilters);
+              }
+            }
+          } else {
+            console.log('Skipping deck reordering due to redo in progress');
+          }
+        }
+      }).catch(error => {
+        console.error('Error updating user match metric:', error);
+      });
+    }
+  }, [addToSaved, animateHeart, currentDeck, handleInteraction, cardCategories, removeFromSaved, setDislikedProperties, setLikedProperties, setLovedProperties, setUserMatchMetric, currentIndex, setCurrentDeckWithProtection, redoInProgress, isUndoInProgress, redoCardId, stableDeck, futureDeck, STABLE_DECK_SIZE, paginationInfo, currentFilters]);
+
+  // Modify the loadMorePropertiesInBackground function to use the stable/future deck concept
+  const loadMorePropertiesInBackground = useCallback(async (nextPageToken, filters, initialCount = 0) => {
+    try {
+      if (isLoadingMore) {
+        console.log('Already loading more properties, skipping this request');
+        return;
       }
       
-      // Baths filter
-      if (newFilters.baths?.length > 0) {
-        const matchesBaths = newFilters.baths.some(bath => {
-          const bathNum = parseInt(bath);
-          if (bath === '5+') return property.baths >= 5;
-          return property.baths === bathNum;
-        });
-        if (!matchesBaths) return false;
+      setIsLoadingMore(true);
+      console.log(`Loading more properties with token: ${nextPageToken}`);
+      
+      const result = await fetchMoreMLSData(nextPageToken, filters);
+      console.log(`Fetched ${result.properties.length} additional properties`);
+      
+      // Store updated pagination info
+      if (result.pagination) {
+        setPaginationInfo(result.pagination);
       }
       
-      // Square footage filter
-      const sqftInRange = property.sqft >= newFilters.sqft.min && 
-                         property.sqft <= newFilters.sqft.max;
-      if (!sqftInRange) return false;
+      // Map the additional properties
+      const mapped = result.properties.map((item, idx) => {
+        // Process images array
+        let images = [];
+        
+        if (item.Media && Array.isArray(item.Media)) {
+          // Filter for photos and map to proper image objects
+          images = item.Media
+            .filter(m => m.MediaCategory === 'Photo' && m.MediaURL)
+            .map(m => ({ uri: m.MediaURL }));
+        }
+        
+        // If no images were found, use a placeholder
+        if (images.length === 0) {
+          images.push(require('../../assets/house1.jpeg'));
+        }
+        
+        // Create a property object with all the necessary data
+        const property = {
+          id: item['@odata.id'] || `property-${initialCount + idx}`,
+          ListingId: item.ListingId || '',
+          listingId: item.ListingId || '',
+          mlsNumber: item.ListingId || item.MLSNumber || '',
+          price: item.ListPrice || 0,
+          beds: item.BedroomsTotal || 0,
+          baths: item.BathroomsTotalInteger || 0,
+          sqft: item.LivingArea || 0,
+          address: `${item.StreetNumber || ''} ${item.StreetName || ''}, ${item.City || ''}, ${item.StateOrProvince || ''}`,
+          images: images,
+          yearBuilt: item.YearBuilt ? item.YearBuilt.toString() : 'N/A',
+          lotSize: item.LotSizeSquareFeet || 0,
+          propertyType: item.PropertyType || '',
+          propertySubType: item.PropertySubType || '',
+          daysOnMarket: item.DaysOnMarket || 0,
+          listingStatus: item.StandardStatus || 'Active',
+          description: item.PublicRemarks || '',
+          listingOffice: item.ListingOffice || item.ListOfficeName || 'MLS Listing'
+        };
+        
+        // Calculate property match metric
+        property.propertyMatchMetric = getPropertyMatchMetric(property);
+        
+        return property;
+      });
       
-      return true;
-    });
+      // Add the new properties to allListings
+      const updatedListings = [...allListings, ...mapped];
+      setAllListings(updatedListings);
+      
+      // Filter out disliked properties with cooldown
+      let filteredProperties = mapped;
+      if (userMatchMetric && userMatchMetric.dislikedProperties && userMatchMetric.dislikedProperties.length > 0) {
+        const currentSwipeCount = userMatchMetric.globalSwipeCount || 0;
+        const cooldownSwipes = 50; // Set cooldown to 50 swipes
+        
+        filteredProperties = mapped.filter(property => {
+          // Check if the property is in the disliked list
+          const dislikedEntry = userMatchMetric.dislikedProperties.find(item => 
+            typeof item === 'string' ? item === property.id : item.id === property.id
+          );
+          
+          // If not disliked, include the property
+          if (!dislikedEntry) return true;
+          
+          // If it's a string (old format), exclude it
+          if (typeof dislikedEntry === 'string') {
+            return false;
+          }
+          
+          // Check if the cooldown period has passed
+          const swipesSinceDisliked = currentSwipeCount - dislikedEntry.dislikedAtSwipeCount;
+          const inCooldown = swipesSinceDisliked < cooldownSwipes;
+          
+          // Include the property only if the cooldown period has passed
+          return !inCooldown;
+        });
+      }
+      
+      // Sort properties by match score if user metric is available
+      let sortedProperties = filteredProperties;
+      if (userMatchMetric && userMatchMetric.currentMetric) {
+        sortedProperties = sortPropertiesByMatchScore(userMatchMetric.currentMetric, filteredProperties);
+        console.log(`Sorted ${sortedProperties.length} background-loaded properties by match score`);
+      }
+      
+      // Update the future deck with the new properties
+      setFutureDeck(prevFutureDeck => {
+        // Combine the existing future deck with the new sorted properties
+        const combinedFutureDeck = [...prevFutureDeck, ...sortedProperties];
+        
+        // Sort the combined future deck if user metric is available
+        let sortedFutureDeck = combinedFutureDeck;
+        if (userMatchMetric && userMatchMetric.currentMetric) {
+          sortedFutureDeck = sortPropertiesByMatchScore(userMatchMetric.currentMetric, combinedFutureDeck);
+        }
+        
+        console.log(`Updated future deck with ${sortedProperties.length} new properties, total: ${sortedFutureDeck.length}`);
+        return sortedFutureDeck;
+      });
+      
+      // Update the current deck with the new properties, but maintain stability of visible cards
+      setCurrentDeckWithProtection(prev => {
+        // Get the current stable deck (cards that are currently visible)
+        const currentStableDeck = prev.slice(currentIndex, currentIndex + STABLE_DECK_SIZE);
+        
+        // Get all cards before the current index (already swiped)
+        const previousCards = prev.slice(0, currentIndex);
+        
+        // Get the updated future deck - we need to use the latest state
+        // This is a workaround since we can't directly access the updated futureDeck state
+        // We'll recreate what the future deck should be with the new properties
+        const existingFutureDeck = prev.slice(currentIndex + STABLE_DECK_SIZE);
+        const updatedFutureDeck = [...existingFutureDeck, ...sortedProperties];
+        
+        // Sort the updated future deck if user metric is available
+        let sortedFutureDeck = updatedFutureDeck;
+        if (userMatchMetric && userMatchMetric.currentMetric) {
+          sortedFutureDeck = sortPropertiesByMatchScore(userMatchMetric.currentMetric, updatedFutureDeck);
+        }
+        
+        // Combine everything: previous cards + stable deck + sorted future deck
+        const newDeck = [...previousCards, ...currentStableDeck, ...sortedFutureDeck];
+        console.log(`Updated current deck: ${previousCards.length} previous cards + ${currentStableDeck.length} stable cards + ${sortedFutureDeck.length} future cards`);
+        
+        return newDeck;
+      });
+      
+      // Continue loading more properties if available
+      if (result.pagination && result.pagination.hasMoreProperties && result.pagination.nextPageToken) {
+        // Add a delay to prevent overwhelming the API
+        setTimeout(() => {
+          loadMorePropertiesInBackground(result.pagination.nextPageToken, filters, updatedListings.length);
+        }, 1000);
+      }
+    } catch (error) {
+      console.error('Error loading more properties in background:', error);
+    } finally {
+      setIsLoadingMore(false);
+    }
+  }, [allListings, currentIndex, isLoadingMore, setCurrentDeckWithProtection, userMatchMetric, STABLE_DECK_SIZE]);
 
-    setCurrentDeck(filteredProperties);
-    setCurrentIndex(0);
-    setIsFilterModalVisible(false);
-  };
+  // Modify the loadInitialData function to use the stable/future deck concept
+  async function loadInitialData(filterOverride = null) {
+    try {
+      setIsLoading(true);
+      
+      // IMPORTANT: Reset all state before loading new data with filters
+      if (filterOverride) {
+        console.log('Filter override provided - resetting all deck state');
+        setCurrentDeck([]);
+        setAllListings([]);
+        setCurrentIndex(0);
+        setSwipedCards([]);
+        setCardCategories({
+          passedCards: [],
+          redoCard: null,
+          activeCard: null,
+          onDeckCards: [],
+          futureCards: []
+        });
+        setStableDeck([]);
+        setFutureDeck([]);
+      }
+      
+      // Use filterOverride if provided, otherwise use the state filters
+      const filtersToUse = filterOverride || (filtersApplied ? filters : null);
+      console.log('Loading data with filters:', filtersToUse);
+      setCurrentFilters(filtersToUse); // Store current filters for background loading
+      
+      // IMPORTANT: First load the user match metric BEFORE fetching properties
+      // This ensures we have the disliked properties list ready
+      let currentUserMetric = null;
+      if (auth.currentUser) {
+        try {
+          console.log('Loading user match metric before fetching properties...');
+          currentUserMetric = await getUserMatchMetric(auth.currentUser.uid);
+          console.log('Successfully loaded user match metric with', 
+            currentUserMetric.dislikedProperties?.length || 0, 'disliked properties');
+        } catch (error) {
+          console.error('Error loading user match metric before fetching:', error);
+        }
+      }
+      
+      // Now fetch properties with the filters
+      console.log('MAKING FRESH API CALL TO FETCH MLS DATA WITH FILTERS:', JSON.stringify(filtersToUse));
+      const result = await fetchMLSData(filtersToUse);
+      console.log(`Fetched ${result.properties.length} properties with filters:`, filtersToUse || 'No filters applied');
+      
+      // Store pagination info for background loading if it exists
+      if (result.pagination) {
+        setPaginationInfo(result.pagination);
+      }
+      
+      // Map the filtered data
+      const mapped = result.properties.map((item, idx) => {
+        // Process images array
+        let images = [];
+        
+        if (item.Media && Array.isArray(item.Media)) {
+          // Filter for photos and map to proper image objects
+          images = item.Media
+            .filter(m => m.MediaCategory === 'Photo' && m.MediaURL)
+            .map(m => ({ uri: m.MediaURL }));
+        }
+        
+        // If no images were found, use a placeholder
+        if (images.length === 0) {
+          images.push(require('../../assets/house1.jpeg'));
+        }
+        
+        // Create a property object with all the necessary data
+        const property = {
+          id: item['@odata.id'] || `property-${idx}`,
+          ListingId: item.ListingId || '',
+          listingId: item.ListingId || '',
+          mlsNumber: item.ListingId || item.MLSNumber || '',
+          price: item.ListPrice || 0,
+          beds: item.BedroomsTotal || 0,
+          baths: item.BathroomsTotalInteger || 0,
+          sqft: item.LivingArea || 0,
+          address: `${item.StreetNumber || ''} ${item.StreetName || ''}, ${item.City || ''}, ${item.StateOrProvince || ''}`,
+          images: images,
+          yearBuilt: item.YearBuilt ? item.YearBuilt.toString() : 'N/A',
+          lotSize: item.LotSizeSquareFeet || 0,
+          propertyType: item.PropertyType || '',
+          propertySubType: item.PropertySubType || '',
+          daysOnMarket: item.DaysOnMarket || 0,
+          listingStatus: item.StandardStatus || 'Active',
+          description: item.PublicRemarks || '',
+          listingOffice: item.ListingOffice || item.ListOfficeName || 'MLS Listing'
+        };
+        
+        // Calculate property match metric
+        property.propertyMatchMetric = getPropertyMatchMetric(property);
+        
+        return property;
+      });
+      
+      // Update state with the user match metric if we loaded it
+      if (currentUserMetric) {
+        setUserMatchMetric(currentUserMetric);
+        setDislikedProperties(currentUserMetric.dislikedProperties || []);
+        setLikedProperties(currentUserMetric.likedProperties || []);
+        setLovedProperties(currentUserMetric.lovedProperties || []);
+      }
+      
+      // Filter out disliked properties with cooldown
+      let filteredProperties = mapped;
+      if (currentUserMetric && currentUserMetric.dislikedProperties && currentUserMetric.dislikedProperties.length > 0) {
+        const currentSwipeCount = currentUserMetric.globalSwipeCount || 0;
+        const cooldownSwipes = 50; // Set cooldown to 50 swipes
+        
+        console.log(`Pre-filtering ${mapped.length} properties against ${currentUserMetric.dislikedProperties.length} disliked properties...`);
+        
+        filteredProperties = mapped.filter(property => {
+          // Check if the property is in the disliked list
+          const dislikedEntry = currentUserMetric.dislikedProperties.find(item => 
+            typeof item === 'string' ? item === property.id : item.id === property.id
+          );
+          
+          // If not disliked, include the property
+          if (!dislikedEntry) return true;
+          
+          // If it's a string (old format), exclude it
+          if (typeof dislikedEntry === 'string') {
+            console.log(`Filtering out disliked property: ${property.address} (old format)`);
+            return false;
+          }
+          
+          // Check if the cooldown period has passed
+          const swipesSinceDisliked = currentSwipeCount - dislikedEntry.dislikedAtSwipeCount;
+          const inCooldown = swipesSinceDisliked < cooldownSwipes;
+          
+          if (inCooldown) {
+            console.log(`Filtering out property ${property.address} in cooldown: ${swipesSinceDisliked}/${cooldownSwipes} swipes since disliked`);
+            return false;
+          } else {
+            console.log(`Property ${property.address} cooldown expired: ${swipesSinceDisliked}/${cooldownSwipes} swipes since disliked`);
+            return true;
+          }
+        });
+        
+        console.log(`Pre-filtered out ${mapped.length - filteredProperties.length} disliked properties (including ${cooldownSwipes}-swipe cooldown)`);
+      }
+      
+      // Sort properties by match score if user metric is available
+      let sortedProperties = filteredProperties;
+      if (currentUserMetric && currentUserMetric.currentMetric) {
+        console.log('Sorting initial properties by user match metric:', currentUserMetric.currentMetric);
+        sortedProperties = sortPropertiesByMatchScore(currentUserMetric.currentMetric, filteredProperties);
+        console.log(`Sorted ${sortedProperties.length} properties by match score`);
+      } else {
+        console.log('No user match metric available for initial sorting');
+      }
+      
+      // When loading data with filters, we reset the current index and replace the entire deck
+      setCurrentIndex(0);
+      setAllListings(mapped);
+      
+      // Split the sorted properties into stable and future decks
+      const initialStableDeck = sortedProperties.slice(0, STABLE_DECK_SIZE);
+      const initialFutureDeck = sortedProperties.slice(STABLE_DECK_SIZE);
+      
+      // Update the stable and future decks
+      setStableDeck(initialStableDeck);
+      setFutureDeck(initialFutureDeck);
+      
+      // Update the current deck with all properties
+      setCurrentDeckWithProtection(sortedProperties);
+      
+      // If we have no properties after filtering, add a placeholder
+      if (sortedProperties.length === 0) {
+        setCurrentDeck([{ isPlaceholder: true }]);
+        setStableDeck([{ isPlaceholder: true }]);
+        setFutureDeck([]);
+      }
+      
+      // If there are more properties, start loading them in the background
+      if (result.pagination && result.pagination.hasMoreProperties && result.pagination.nextPageToken) {
+        console.log('Starting background loading of additional properties...');
+        // Add a small delay before starting background loading to ensure UI is responsive
+        setTimeout(() => {
+          loadMorePropertiesInBackground(result.pagination.nextPageToken, filtersToUse, mapped.length);
+        }, 500);
+      }
+      
+      setIsLoading(false);
+    } catch (error) {
+      console.error('Error loading initial data:', error);
+      setIsLoading(false);
+      setCurrentDeck([{ isPlaceholder: true, isError: true, errorMessage: 'Error loading properties. Please try again.' }]);
+      setStableDeck([{ isPlaceholder: true, isError: true, errorMessage: 'Error loading properties. Please try again.' }]);
+      setFutureDeck([]);
+    } finally {
+      setIsLoading(false);
+    }
+  }
 
-  const clearFilters = () => {
+  const clearFilters = useCallback(() => {
     const defaultFilters = {
+      screen: 'home',
       priceRange: { min: 0, max: 2000000 },
       beds: [],
       baths: [],
-      sqft: { min: 0, max: 10000 }
+      sqft: { min: 0, max: 10000 },
+      yearBuilt: { min: 1900, max: 2024 },
+      homeType: [],
+      hasBeenSet: false
     };
-    setFilters(defaultFilters);
+    
+    // IMPORTANT: Reset all state before clearing filters
+    console.log('Clearing filters - resetting all deck state');
+    setCurrentDeck([]);
+    setAllListings([]);
     setCurrentIndex(0);
-    setCurrentDeck([...properties]); // Reset to original properties
+    setSwipedCards([]);
+    setCardCategories({
+      passedCards: [],
+      redoCard: null,
+      activeCard: null,
+      onDeckCards: [],
+      futureCards: []
+    });
+    setStableDeck([]);
+    setFutureDeck([]);
+    
+    setFilters(defaultFilters);
+    setFiltersApplied(false);
+    setCurrentFilters(null);
     setIsFilterModalVisible(false);
+    
+    // Reset to initial data load
+    loadInitialData(null);
+  }, [loadInitialData]);
+
+  // Add a function to load the user's match metric
+  const loadUserMatchMetric = useCallback(async () => {
+    try {
+      if (auth.currentUser) {
+        const userId = auth.currentUser.uid;
+        const metric = await getUserMatchMetric(userId);
+        console.log('Loaded user match metric:', metric);
+        setUserMatchMetric(metric);
+        
+        // Set the disliked, liked, and loved properties arrays
+        setDislikedProperties(metric.dislikedProperties || []);
+        setLikedProperties(metric.likedProperties || []);
+        setLovedProperties(metric.lovedProperties || []);
+      }
+    } catch (error) {
+      console.error('Error loading user match metric:', error);
+    }
+  }, []);
+
+  // Add a function to check if the user has seen the tutorial
+  const checkTutorialStatus = useCallback(async () => {
+    try {
+      if (auth.currentUser) {
+        const userId = auth.currentUser.uid;
+        const userDocRef = doc(db, 'Users', userId);
+        const userDoc = await getDoc(userDocRef);
+        
+        if (userDoc.exists()) {
+          const userData = userDoc.data();
+          // If the user has not seen the tutorial, show it
+          if (!userData.hasSeenTutorial) {
+            setShowTutorial(true);
+            // Update the user document to indicate they've seen the tutorial
+            await setDoc(userDocRef, { hasSeenTutorial: true }, { merge: true });
+          }
+        }
+      } else {
+        // If no user is logged in, show the tutorial anyway
+        setShowTutorial(true);
+      }
+    } catch (error) {
+      console.error('Error checking tutorial status:', error);
+      // If there's an error, default to showing the tutorial
+      setShowTutorial(true);
+    }
+  }, []);
+
+  // Move checkForActiveFilter to component level so it can be accessed by navigation listener
+  const checkForActiveFilter = async (isRetry = false) => {
+    try {
+      setIsLoading(true);
+      const userId = auth.currentUser?.uid;
+      
+      if (userId) {
+        // Get filters from the Users/{userId}/Filters collection
+        const filtersRef = collection(db, 'Users', userId, 'Filters');
+        const querySnapshot = await getDocs(filtersRef);
+        
+        let activeFilter = null;
+        
+        querySnapshot.forEach((doc) => {
+          const data = doc.data();
+          if (data.IsActive) {
+            activeFilter = {
+              id: doc.id,
+              priceRange: {
+                min: data.PriceRange?.Min || 0,
+                max: data.PriceRange?.Max || 2000000
+              },
+              beds: data.Beds || [],
+              baths: data.Baths || [],
+              homeType: data.HomeType || [],
+              sqft: {
+                min: data.Sqft?.Min || 0,
+                max: data.Sqft?.Max || 10000
+              },
+              yearBuilt: {
+                min: data.YearBuilt?.Min || 1900,
+                max: data.YearBuilt?.Max || new Date().getFullYear()
+              },
+              // Add location data
+              addressText: data.AddressText || '',
+              mapRegion: data.MapRegion ? {
+                latitude: data.MapRegion.Latitude,
+                longitude: data.MapRegion.Longitude,
+                latitudeDelta: data.MapRegion.LatitudeDelta,
+                longitudeDelta: data.MapRegion.LongitudeDelta
+              } : null,
+              radiusMiles: data.RadiusMiles || 10,
+              activeFilterId: doc.id,
+              name: data.Name || 'Default Filter'
+            };
+          }
+        });
+        
+        // If we found an active filter, apply it
+        if (activeFilter) {
+          console.log('✅ Found active filter, applying:', activeFilter);
+          
+          // IMPORTANT: Reset all state before applying the active filter
+          console.log('Resetting all deck state for active filter');
+          setCurrentDeck([]);
+          setAllListings([]);
+          setCurrentIndex(0);
+          setSwipedCards([]);
+          setCardCategories({
+            passedCards: [],
+            redoCard: null,
+            activeCard: null,
+            onDeckCards: [],
+            futureCards: []
+          });
+          setStableDeck([]);
+          setFutureDeck([]);
+          
+          setFilters(prevFilters => ({ ...prevFilters, ...activeFilter, hasBeenSet: true }));
+          setFiltersApplied(true);
+          await loadInitialData(activeFilter);
+          return true; // Indicate success
+        } else {
+          // No active filter found
+          if (isRetry) {
+            console.log('⏳ No active filter found, will retry...');
+            return false; // Indicate no filter found, should retry
+          } else {
+            console.log('No active filter found, loading all data');
+            await loadInitialData(null);
+            return true; // Indicate we're done (loaded unfiltered data)
+          }
+        }
+      } else {
+        // No user ID, load all data
+        console.log('No user ID found, loading all data');
+        await loadInitialData(null);
+        return true; // Indicate we're done
+      }
+    } catch (error) {
+      console.error('Error checking for active filter:', error);
+      // Load all data if there's an error
+      await loadInitialData(null);
+      return true; // Indicate we're done
+    } finally {
+      setIsLoading(false);
+    }
   };
 
+  // Add a polling function that keeps checking until a filter is found
+  const pollForActiveFilter = async (maxAttempts = 20, delayMs = 1000) => {
+    console.log('🔄 Starting to poll for active filter...');
+    
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      console.log(`🔄 Polling attempt ${attempt}/${maxAttempts} for active filter...`);
+      
+      const filterFound = await checkForActiveFilter(true);
+      
+      if (filterFound) {
+        console.log('✅ Active filter found and applied successfully!');
+        return true;
+      }
+      
+      // If this isn't the last attempt, wait before trying again
+      if (attempt < maxAttempts) {
+        console.log(`⏳ Waiting ${delayMs}ms before next attempt...`);
+        await new Promise(resolve => setTimeout(resolve, delayMs));
+      }
+    }
+    
+    // If we've exhausted all attempts, load unfiltered data
+    console.log('⚠️ No active filter found after all attempts, loading unfiltered data');
+    await loadInitialData(null);
+    return false;
+  };
+
+  // Initial data loading when component mounts
+  useEffect(() => {
+    // Load user match metric first
+    loadUserMatchMetric();
+    
+    // Check for active filters when component first mounts
+    if (auth.currentUser?.uid) {
+      console.log('HomeScreen mounted - polling for active filters...');
+      pollForActiveFilter().then(() => {
+        setHasBeenInitialized(true);
+      });
+    } else {
+      // No user logged in, load all data
+      console.log('No user logged in on mount, loading all data');
+      loadInitialData(null).then(() => {
+        setHasBeenInitialized(true);
+      });
+    }
+    
+    // Check if the user has seen the tutorial
+    checkTutorialStatus();
+    
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('focus', () => {
+      // Only poll for filters if HomeScreen has NOT been initialized (i.e., after onboarding/setup)
+      if (!hasBeenInitialized && auth.currentUser?.uid) {
+        console.log('HomeScreen focused - polling for active filters...');
+        pollForActiveFilter();
+      }
+      
+      if (!filters.hasBeenSet) {
+        const defaultFilters = {
+          screen: 'home',
+          priceRange: { min: 0, max: 2000000 },
+          beds: [],
+          baths: [],
+          sqft: { min: 0, max: 10000 },
+          yearBuilt: { min: 1900, max: 2024 },
+          homeType: [],
+          hasBeenSet: false
+        };
+        setFilters(defaultFilters);
+        setCurrentDeck(allListings);
+      }
+    });
+    return unsubscribe;
+  }, [navigation, allListings, filters.hasBeenSet, hasBeenInitialized]);
+
+  // Fix for the setTimeout in useEffect
+  useEffect(() => {
+    const handleAnimationStart = () => {
+      setOverlayOpacity(new Animated.Value(1));
+      setHeartScale(new Animated.Value(0.3));
+      setParticles([...Array(12)].map(() => ({
+        x: new Animated.Value(0),
+        y: new Animated.Value(0),
+        scale: new Animated.Value(0),
+        alpha: new Animated.Value(0),
+      })));
+      
+      Animated.parallel([
+        Animated.timing(heartScale, {
+          toValue: 1,
+          duration: 500,
+          useNativeDriver: true,
+        }),
+        ...particles.map((particle, i) => {
+          const angle = (i / particles.length) * 2 * Math.PI;
+          const distance = 100 + Math.random() * 50;
+          
+          return Animated.parallel([
+            Animated.timing(particle.x, {
+              toValue: Math.cos(angle) * distance,
+              duration: 800,
+              useNativeDriver: true,
+            }),
+            Animated.timing(particle.y, {
+              toValue: Math.sin(angle) * distance,
+              duration: 800,
+              useNativeDriver: true,
+            }),
+            Animated.timing(particle.scale, {
+              toValue: Math.random() * 0.8 + 0.2,
+              duration: 800,
+              useNativeDriver: true,
+            }),
+            Animated.sequence([
+              Animated.timing(particle.alpha, {
+                toValue: Math.random() * 0.8 + 0.2,
+                duration: 400,
+                useNativeDriver: true,
+              }),
+              Animated.timing(particle.alpha, {
+                toValue: 0,
+                duration: 400,
+                useNativeDriver: true,
+              }),
+            ]),
+          ]);
+        }),
+      ]).start();
+      
+      setTimeout(() => {
+        Animated.timing(overlayOpacity, {
+          toValue: 0,
+          duration: 500,
+          useNativeDriver: true,
+        }).start(() => {
+          setOverlayIcon(null);
+        });
+      }, 800);
+    };
+    
+    if (overlayIcon) {
+      handleAnimationStart();
+    }
+  }, [overlayOpacity, particles, heartScale]);
+
+  const handleRedo = useCallback(() => {
+    // Only allow redo if not already in progress and there are passed cards
+    if (isUndoInProgress || cardCategories.passedCards.length === 0) return;
+    
+    handleInteraction();
+    setHasInteracted(true);
+    setShowTutorial(false);
+    
+    // Set redo in progress
+    setIsUndoInProgress(true);
+    setRedoInProgress(true);
+    
+    // Get the most recently passed card
+    const lastPassedCard = cardCategories.passedCards[cardCategories.passedCards.length - 1];
+    const swipeDirection = lastPassedCard.swipeDirection;
+    
+    console.log(`REDO: Bringing back property - MLS ID: ${lastPassedCard.mlsNumber}`);
+    
+    // Set the redoCardId
+    setRedoCardId(lastPassedCard.id);
+    
+    // Start with opacity at 0
+    redoCardOpacity.setValue(0);
+    
+    // Remove the card from passed cards
+    setCardCategories(prev => ({
+      ...prev,
+      passedCards: prev.passedCards.slice(0, -1),
+      redoCard: {
+        ...lastPassedCard,
+        isRedoCard: true,
+        bypassFiltering: true,
+        redoTimestamp: Date.now(),
+        forceDisplay: true,
+        mustNotBeReplaced: true,
+        redoLock: true,
+        uniqueRedoId: `redo-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+        priority: 9999,
+        _redoProtected: true,
+        _absoluteProtection: true
+      }
+    }));
+    
+    // Decrement the current index
+    setCurrentIndex(prev => Math.max(0, prev - 1));
+    
+    // Create the redone card with special flags
+    const redoCardWithFlag = {
+      ...lastPassedCard,
+      isRedoCard: true,
+      bypassFiltering: true,
+      redoTimestamp: Date.now(),
+      forceDisplay: true,
+      mustNotBeReplaced: true,
+      redoLock: true,
+      uniqueRedoId: `redo-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+      priority: 9999,
+      _redoProtected: true,
+      _absoluteProtection: true
+    };
+    
+    // Add the card back to the deck at the current position
+    // Use setCurrentDeckWithProtection instead of setCurrentDeck
+    setCurrentDeckWithProtection(prev => {
+      const newDeck = [...prev];
+      newDeck.splice(currentIndex, 0, redoCardWithFlag);
+      return newDeck;
+    });
+    
+    // Update the stable deck to include the redone card
+    setStableDeck(prev => {
+      const newStableDeck = [redoCardWithFlag, ...prev.slice(0, STABLE_DECK_SIZE - 1)];
+      return newStableDeck;
+    });
+    
+    // Animate the card fading in
+    Animated.timing(redoCardOpacity, {
+      toValue: 1,
+      duration: 2500,
+      useNativeDriver: true
+    }).start();
+    
+    // Undo the user match metric update in the background
+    if (auth.currentUser) {
+      const userId = auth.currentUser.uid;
+      console.log(`Background: Undoing user match metric update for property: ${lastPassedCard.id}`);
+      
+      setTimeout(() => {
+        undoUserMatchMetricInBackground(userId, lastPassedCard.id, swipeDirection);
+      }, 500);
+      
+      if (swipeDirection === 'right' || swipeDirection === 'top') {
+        removeFromSaved(lastPassedCard.id);
+      }
+    }
+  }, [cardCategories, currentIndex, isUndoInProgress, redoCardOpacity, removeFromSaved, handleInteraction, setCurrentDeckWithProtection, STABLE_DECK_SIZE]);
+
+  // Add this new function to handle database updates in the background
+  const undoUserMatchMetricInBackground = async (userId, propertyId, swipeDirection) => {
+    try {
+      console.log(`Background: Undoing user match metric update for property: ${propertyId}`);
+      
+      // Get the current user swipe count
+      const swipeCount = await getUserSwipeCount(userId);
+      if (!swipeCount) return;
+      
+      // Create an updated swipe count object
+      const updatedSwipeCount = { ...swipeCount };
+      
+      // Decrement the appropriate counter based on swipe direction
+      if (swipeDirection === 'left') {
+        updatedSwipeCount.LeftSwipes = Math.max(0, (updatedSwipeCount.LeftSwipes || 0) - 1);
+      } else if (swipeDirection === 'right') {
+        updatedSwipeCount.RightSwipes = Math.max(0, (updatedSwipeCount.RightSwipes || 0) - 1);
+      } else if (swipeDirection === 'top') {
+        updatedSwipeCount.UpSwipes = Math.max(0, (updatedSwipeCount.UpSwipes || 0) - 1);
+      }
+      
+      // Decrement the total swipes counter
+      updatedSwipeCount.TotalSwipes = Math.max(0, (updatedSwipeCount.TotalSwipes || 0) - 1);
+      updatedSwipeCount.LastUpdated = new Date();
+      
+      // Save the updated swipe count to Firestore
+      const swipeCountRef = doc(db, 'Users', userId, 'SwipeCount', 'Current');
+      await setDoc(swipeCountRef, updatedSwipeCount);
+      
+      console.log(`Updated swipe count after redo. Total swipes: ${updatedSwipeCount.TotalSwipes}`);
+      
+      // Get the current user match metric
+      const userMatchMetricRef = doc(db, 'Users', userId, 'UserMatchMetric', 'Current');
+      const userMatchMetricDoc = await getDoc(userMatchMetricRef);
+      
+      if (userMatchMetricDoc.exists()) {
+        const userMatchMetric = userMatchMetricDoc.data();
+        
+        // Create an updated user match metric object
+        const updatedMetric = { ...userMatchMetric };
+        
+        // Update the GlobalSwipeCount to match the TotalSwipes
+        updatedMetric.GlobalSwipeCount = updatedSwipeCount.TotalSwipes;
+        
+        // Undo the specific action based on the swipe direction
+        if (swipeDirection === 'left') {
+          // Remove from disliked properties
+          updatedMetric.DislikedProperties = (updatedMetric.DislikedProperties || []).filter(item => 
+            typeof item === 'string' 
+              ? item !== propertyId 
+              : item.id !== propertyId
+          );
+        } else if (swipeDirection === 'right') {
+          // Remove from liked properties
+          updatedMetric.LikedProperties = (updatedMetric.LikedProperties || []).filter(id => id !== propertyId);
+        } else if (swipeDirection === 'top') {
+          // Remove from loved properties
+          updatedMetric.LovedProperties = (updatedMetric.LovedProperties || []).filter(id => id !== propertyId);
+        }
+        
+        // Save the updated user match metric to Firestore
+        await setDoc(userMatchMetricRef, updatedMetric);
+        
+        console.log('Updated user match metric after redo in background');
+      }
+    } catch (error) {
+      console.error('Error undoing user match metric update in background:', error);
+    }
+  };
+
+  const applyFilters = useCallback((newFilters) => {
+    console.log('Applying filters to HomeScreen:', newFilters);
+    
+    // Add a timestamp to force a fresh API call and prevent caching
+    const updatedFilters = { 
+      ...newFilters, 
+      hasBeenSet: true,
+      _timestamp: new Date().getTime() // Add timestamp to bust cache
+    };
+    
+    console.log('APPLYING NEW FILTER - FORCING COMPLETE REFRESH');
+    
+    // IMPORTANT: Reset all state before applying new filters
+    setIsLoading(true); // Show loading indicator immediately
+    
+    // Close the filter modal immediately to show loading state
+    setIsFilterModalVisible(false);
+    
+    // Clear all existing data
+    setCurrentDeck([]);
+    setAllListings([]);
+    setCurrentIndex(0);
+    setSwipedCards([]);
+    setCardCategories({
+      passedCards: [],
+      redoCard: null,
+      activeCard: null,
+      onDeckCards: [],
+      futureCards: []
+    });
+    
+    // Reset stable and future decks
+    setStableDeck([]);
+    setFutureDeck([]);
+    
+    // Reset pagination info to force a fresh fetch
+    setPaginationInfo({
+      hasMoreProperties: false,
+      nextPageToken: null,
+      currentPage: 1,
+      totalFetched: 0
+    });
+    
+    // Update filter state AFTER clearing data
+    setFilters(updatedFilters);
+    setFiltersApplied(true);
+    setCurrentFilters(updatedFilters);
+    
+    // IMPORTANT: Use loadInitialData with the filter override to force a fresh API call
+    // This will bypass any existing data and make a completely new request
+    console.log('Calling loadInitialData with new filters to force fresh API call');
+    
+    // Small delay to ensure state updates have propagated
+    setTimeout(() => {
+      loadInitialData(updatedFilters);
+    }, 100);
+  }, [loadInitialData]);
+
+  // Conditional rendering for loading state
+  if (isLoading) {
+    return <LoadingCards />;
+  }
+
+  // 7) Render the component
   return (
-    <TouchableOpacity 
-      activeOpacity={1} 
-      onPress={handleInteraction}
-      style={styles.container}
-    >
-      {/* Header with adjusted padding */}
+    <TouchableOpacity activeOpacity={1} onPress={handleInteraction} style={styles.container}>
+      {/* Header */}
       <View style={styles.header}>
         <View style={styles.logoContainer}>
-          <Image 
-            source={require('../../assets/Homerunnhousecolorlogo.png')} 
-            style={styles.logo}
-          />
+          <Image source={require('../../assets/Homerunnhousecolorlogo.png')} style={styles.logo} />
           <Text style={styles.logoText}>HOMERUNN</Text>
         </View>
         <View style={styles.headerIcons}>
           <TouchableOpacity 
-            onPress={handleRedo}
             style={[
-              styles.redoButton,
-              { opacity: swipedCards.length > 0 ? 1 : 0.5 }
-            ]}
+              styles.actionButton, 
+              styles.redoButton
+            ]} 
+            onPress={handleRedo}
+            disabled={isUndoInProgress || cardCategories.passedCards.length === 0}
           >
             <Ionicons 
               name="refresh" 
               size={24} 
-              color={swipedCards.length > 0 ? "black" : "#ccc"}
+              color={(isUndoInProgress || cardCategories.passedCards.length === 0) ? '#ccc' : 'black'} 
             />
           </TouchableOpacity>
-          <TouchableOpacity onPress={() => setIsFilterModalVisible(true)}>
+          <TouchableOpacity style={styles.bellButton} onPress={() => setShowNotificationDropdown(!showNotificationDropdown)}>
+            <FontAwesome name="bell-o" size={20} color="black" />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => setIsFilterModalVisible(true)} style={styles.filterButton}>
             <Ionicons name="filter" size={24} color="black" />
           </TouchableOpacity>
         </View>
       </View>
 
-      {/* Swipeable Cards Container */}
+      {/* Swiper */}
       <View style={styles.swiperContainer}>
         <Swiper
           cards={currentDeck}
-          renderCard={(card) => (
-            <TouchableOpacity
-              style={styles.card}
-              onPress={() => navigation.navigate('PropertyImages', { property: card })}
-            >
-              <View style={styles.imageContainer}>
-                <Image 
-                  source={card.images[0]}
-                  style={styles.image}
-                  resizeMode="cover"
-                />
-                <Image 
-                  source={card.images[1]}
-                  style={styles.image}
-                  resizeMode="cover"
-                />
-              </View>
-              <View style={styles.cardDetails}>
-                <Text style={styles.price}>{formatPrice(card.price)}</Text>
-                <Text style={styles.details}>{card.details}</Text>
-                <Text style={styles.address}>{card.address}</Text>
-              </View>
-            </TouchableOpacity>
-          )}
+          renderCard={(card) => {
+            if (!card) {
+              return (
+                <View style={[styles.card, { justifyContent: 'center', alignItems: 'center' }]}>
+                  <Text style={{ fontSize: 18 }}>No properties</Text>
+                </View>
+              );
+            }
+            if (card.isPlaceholder) {
+              return (
+                <View style={[styles.card, { justifyContent: 'center', alignItems: 'center', backgroundColor: '#f8f9fa' }]}>
+                  <Text style={{ fontSize: 18, textAlign: 'center', padding: 20, color: '#555' }}>
+                    No properties match your filters.
+                  </Text>
+                  <TouchableOpacity style={{ marginTop: 20, padding: 12, backgroundColor: '#ff5a5f', borderRadius: 8 }} onPress={clearFilters}>
+                    <Text style={{ color: 'white', fontWeight: 'bold' }}>Clear Filters</Text>
+                  </TouchableOpacity>
+                </View>
+              );
+            }
+            
+            // Check if this is the card being redone
+            const isRedoCard = redoCardId === card.id;
+            
+            // Use cached images if available for this card
+            const cardImages = cachedCardImages[card.id] || card.images;
+            
+            return (
+              <TouchableOpacity
+                style={styles.card}
+                onPress={() => {
+                  navigation.navigate('PropertyImages', { property: card, sourceScreen: 'Home' });
+                }}
+                activeOpacity={1}
+              >
+                {/* Apply the fade animation to the entire card including images */}
+                <Animated.View 
+                  style={{ 
+                    opacity: isRedoCard ? redoCardOpacity : 1,
+                    width: '100%',
+                    height: '100%'
+                  }}
+                >
+                  <View style={styles.imageContainer}>
+                    {cardImages && cardImages.length > 0 ? (
+                      <View style={styles.imageGrid}>
+                        {/* First image (top third) */}
+                        <Image 
+                          source={typeof cardImages[0] === 'number' ? cardImages[0] : { uri: cardImages[0].uri }} 
+                          style={styles.stackedImage} 
+                          resizeMode="cover" 
+                        />
+                        
+                        {/* Second image (middle third) */}
+                        {cardImages.length > 1 ? (
+                          <Image 
+                            source={typeof cardImages[1] === 'number' ? cardImages[1] : { uri: cardImages[1].uri }} 
+                            style={styles.stackedImage} 
+                            resizeMode="cover" 
+                          />
+                        ) : (
+                          <PlaceholderImage style={styles.stackedImage} />
+                        )}
+                        
+                        {/* Third image (bottom third) */}
+                        {cardImages.length > 2 ? (
+                          <Image 
+                            source={typeof cardImages[2] === 'number' ? cardImages[2] : { uri: cardImages[2].uri }} 
+                            style={styles.stackedImage} 
+                            resizeMode="cover" 
+                          />
+                        ) : (
+                          <PlaceholderImage style={styles.stackedImage} />
+                        )}
+                      </View>
+                    ) : (
+                      <View style={styles.imageGrid}>
+                        <PlaceholderImage style={styles.stackedImage} />
+                        <PlaceholderImage style={styles.stackedImage} />
+                        <PlaceholderImage style={styles.stackedImage} />
+                      </View>
+                    )}
+                    
+                    {/* Display listing status badge if available */}
+                    {card.listingStatus && (
+                      <View style={[
+                        styles.statusBadge, 
+                        { 
+                          backgroundColor: getStatusColor(card.listingStatus),
+                          left: 10,  // Position on left instead of right
+                          right: undefined // Remove right positioning
+                        }
+                      ]}>
+                        <Text style={styles.statusText}>{card.listingStatus}</Text>
+                      </View>
+                    )}
+                  </View>
+                  <View style={styles.cardDetails}>
+                    <Text style={styles.price}>{formatPrice(card.price)}</Text>
+                    <View style={styles.detailsContainer}>
+                      <View style={styles.detailItem}>
+                        <MaterialCommunityIcons name="bed-outline" size={16} color="#333" />
+                        <Text style={styles.details}>{card.beds} bed</Text>
+                      </View>
+                      <View style={styles.detailItem}>
+                        <MaterialCommunityIcons name="shower" size={16} color="#333" />
+                        <Text style={styles.details}>{card.baths} bath</Text>
+                      </View>
+                      <View style={styles.detailItem}>
+                        <MaterialCommunityIcons name="ruler-square" size={16} color="#333" />
+                        <Text style={styles.details}>{card.sqft.toLocaleString()} sq ft</Text>
+                      </View>
+                    </View>
+                    <Text style={styles.address}>{card.address}</Text>
+                    <View style={styles.bottomRow}>
+                      {card.yearBuilt !== 'N/A' && (
+                        <Text style={styles.yearBuilt}>Built in {card.yearBuilt}</Text>
+                      )}
+                      <Text style={styles.brokerageText}>
+                        {card.listingOffice || 'MLS Listing'}
+                      </Text>
+                    </View>
+                    
+                    {/* Display match score if available */}
+                    {userMatchMetric && userMatchMetric.currentMetric && card.propertyMatchMetric && (
+                      <View style={styles.matchScoreContainer}>
+                        <Text style={styles.matchScoreLabel}>Match Score:</Text>
+                        <Text style={styles.matchScoreValue}>
+                          {Math.min(100, Math.round(calculateMatchScore(userMatchMetric.currentMetric, card.propertyMatchMetric) * 100 / 150))}%
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                </Animated.View>
+              </TouchableOpacity>
+            );
+          }}
           stackSize={3}
           backgroundColor="transparent"
           cardVerticalMargin={0}
           cardHorizontalMargin={width * 0.04}
-          marginBottom={60}
+          marginBottom={BOTTOM_PADDING}
           marginTop={20}
           onSwipedLeft={(cardIndex) => handleSwipe(cardIndex, 'left')}
           onSwipedRight={(cardIndex) => handleSwipe(cardIndex, 'right')}
           onSwipedTop={(cardIndex) => handleSwipe(cardIndex, 'top')}
-          disableBottomSwipe={true}
+          disableBottomSwipe
           disableTopSwipe={false}
           cardIndex={0}
           stackAnimationFriction={10}
@@ -467,7 +1569,7 @@ const HomeScreen = () => {
                   fontSize: height * 0.2,
                   borderWidth: 0,
                   position: 'absolute',
-                  zIndex: 10,
+                  zIndex: 10
                 },
                 wrapper: {
                   flexDirection: 'column',
@@ -477,15 +1579,43 @@ const HomeScreen = () => {
                   top: 0,
                   left: 0,
                   right: 0,
-                  height: height * 0.7,
+                  height: CARD_HEIGHT,
                   borderRadius: 10,
                   overflow: 'hidden',
-                  backgroundColor: 'rgba(0,0,0,0.5)',
-                  zIndex: 5,
+                  backgroundColor: 'rgba(0,0,0,0.3)',
+                  zIndex: 5
                 }
               }
             },
             right: {
+              title: '✓',
+              style: {
+                label: {
+                  backgroundColor: 'transparent',
+                  borderColor: 'transparent',
+                  color: '#fff',
+                  fontSize: height * 0.2,
+                  borderWidth: 0,
+                  position: 'absolute',
+                  zIndex: 10
+                },
+                wrapper: {
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  height: CARD_HEIGHT,
+                  borderRadius: 10,
+                  overflow: 'hidden',
+                  backgroundColor: 'rgba(0,0,0,0.3)',
+                  zIndex: 5
+                }
+              }
+            },
+            top: {
               title: '♥',
               style: {
                 label: {
@@ -495,7 +1625,7 @@ const HomeScreen = () => {
                   fontSize: height * 0.2,
                   borderWidth: 0,
                   position: 'absolute',
-                  zIndex: 10,
+                  zIndex: 10
                 },
                 wrapper: {
                   flexDirection: 'column',
@@ -505,161 +1635,130 @@ const HomeScreen = () => {
                   top: 0,
                   left: 0,
                   right: 0,
-                  height: height * 0.7,
-                  borderRadius: 10,
-                  overflow: 'hidden',
-                  backgroundColor: 'rgba(0,0,0,0.5)',
-                  zIndex: 5,
-                }
-              }
-            },
-            top: {
-              title: '★',
-              style: {
-                label: {
-                  backgroundColor: 'transparent',
-                  borderColor: 'transparent',
-                  color: '#fff',
-                  fontSize: height * 0.2,
-                  borderWidth: 0,
-                  position: 'absolute',
-                  zIndex: 10,
-                },
-                wrapper: {
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  position: 'absolute',
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  height: height * 0.7,
+                  height: CARD_HEIGHT,
                   borderRadius: 10,
                   overflow: 'hidden',
                   backgroundColor: 'rgba(0,0,0,0.3)',
-                  zIndex: 5,
+                  zIndex: 5
                 }
               }
-            },
+            }
           }}
           overlayLabelStyle={{
             fontSize: height * 0.2,
             color: '#fff',
-            fontWeight: 'bold',
+            fontWeight: 'bold'
           }}
           animateOverlayLabelsOpacity
-          overlayOpacityHorizontalThreshold={width / 9}
-          overlayOpacityVerticalThreshold={height / 10}
-          inputOverlayLabelsOpacityRangeX={[-width / 4, -width / 9, 0, width / 9, width / 4]}
+          overlayOpacityHorizontalThreshold={width / 15}
+          overlayOpacityVerticalThreshold={height / 15}
+          inputOverlayLabelsOpacityRangeX={[-width / 5, -width / 10, 0, width / 10, width / 5]}
           inputOverlayLabelsOpacityRangeY={[-height / 5, -height / 10, 0, height / 10, height / 5]}
-          outputOverlayLabelsOpacityRangeX={[1, 0.4, 0, 0.4, 1]}
-          outputOverlayLabelsOpacityRangeY={[1, 0.4, 0, 0.4, 1]}
+          outputOverlayLabelsOpacityRangeX={[0.8, 0.4, 0, 0.4, 0.8]}
+          outputOverlayLabelsOpacityRangeY={[0.8, 0.4, 0, 0.4, 0.8]}
           overlayOpacityReverse={false}
-          swipeAnimationDuration={400}
+          swipeAnimationDuration={350}
           animateCardOpacity={false}
-          useViewOverflow={true}
+          useViewOverflow
           containerStyle={{
             backgroundColor: 'transparent',
-            paddingHorizontal: width * 0.02,
+            paddingHorizontal: width * 0.02
           }}
           cardStyle={{
             position: 'absolute',
             top: 0,
-            width: width * 0.92,
+            width: width * 0.92
           }}
         />
       </View>
 
-      {/* Star Overlay */}
-      {showStarOverlay && (
-        <Animated.View 
-          style={[
-            styles.overlay,
-            {
-              opacity: overlayOpacity,
-            }
-          ]}
-        >
-          {/* Particles */}
-          {particles.map((particle, index) => (
-            <Animated.View
-              key={index}
-              style={[
-                styles.particle,
-                {
-                  transform: [
-                    { translateX: particle.x },
-                    { translateY: particle.y },
-                    { scale: starScale }
-                  ]
-                }
-              ]}
-            />
-          ))}
-          
-          {/* Main Star - using the same star symbol as the swipe overlay */}
-          <Animated.View
-            style={{
-              transform: [{ scale: starScale }]
-            }}
-          >
-            <Text style={styles.starSymbol}>★</Text>
+      {/* Heart Overlay */}
+      {showHeartOverlay && (
+        <Animated.View style={[styles.overlay, { opacity: overlayOpacity }]}>
+          <Animated.View style={{ transform: [{ scale: heartScale }] }}>
+            <Text style={styles.heartSymbol}>{overlayIcon}</Text>
           </Animated.View>
         </Animated.View>
       )}
 
-      <FilterModal 
+      {/* Filter Modal */}
+      <FilterModal
         visible={isFilterModalVisible}
         onClose={() => setIsFilterModalVisible(false)}
         onApply={applyFilters}
         onClear={clearFilters}
         currentFilters={filters}
+        screen="home"
       />
 
-      <SwipeTutorial 
-        visible={showTutorial} 
+      {/* Swipe Tutorial */}
+      <SwipeTutorial
+        visible={showTutorial}
         onDismiss={() => {
           setShowTutorial(false);
           setHasInteracted(true);
         }}
       />
+
+      {/* Notification Dropdown */}
+      <NotificationDropdown
+        visible={showNotificationDropdown}
+        onClose={() => setShowNotificationDropdown(false)}
+        notifications={[]} // Empty array for now - will be populated with real notifications later
+      />
     </TouchableOpacity>
   );
-};
+}
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: '#fff'
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 16,
-    paddingTop: 50,
+    paddingTop: HEADER_HEIGHT - 30,
     paddingBottom: 16,
     backgroundColor: '#fff',
     borderBottomWidth: 1,
-    borderBottomColor: '#ddd',
+    borderBottomColor: '#ddd'
   },
   logoContainer: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'center'
   },
   logo: {
     width: 28,
     height: 28,
-    marginRight: 8,
+    marginRight: 8
   },
   logoText: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: '#fc565b',
+    color: '#fc565b'
   },
   headerIcons: {
     flexDirection: 'row',
-    gap: 15,
+    alignItems: 'center',
+    marginRight: 8
+  },
+  bellButton: {
+    marginHorizontal: 6
+  },
+  redoButton: {
+    marginHorizontal: 6
+  },
+  filterButton: {
+    marginHorizontal: 6
+  },
+  swiperContainer: {
+    flex: 1,
+    paddingTop: height * 0.01,
+    paddingBottom: height * 0.01,
+    backgroundColor: '#fff'
   },
   card: {
     backgroundColor: '#fff',
@@ -668,70 +1767,62 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#ddd',
     elevation: 3,
-    height: height * 0.7,
+    height: CARD_HEIGHT,
     shadowColor: '#000',
-    shadowOffset: { 
-      width: 0, 
-      height: 6 
-    },
+    shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.2,
-    shadowRadius: 8,
+    shadowRadius: 8
   },
   imageContainer: {
-    height: height * 0.45, // 45% of screen height for images
-    flexDirection: 'column',
+    height: '82%',
+    flexDirection: 'column'
   },
-  image: {
+  imageGrid: {
+    flexDirection: 'column',
+    height: '100%',
     width: '100%',
-    height: '50%', // Each image takes half of the imageContainer
+  },
+  stackedImage: {
+    width: '100%',
+    height: '33.33%',
     resizeMode: 'cover',
   },
   cardDetails: {
-    padding: height * 0.02,
-    height: height * 0.25,
-    justifyContent: 'space-around',
-    backgroundColor: '#f5f7fa', // Slightly lighter frosted gray
+    flex: 1,
+    padding: 8,
+    paddingHorizontal: 12,
+    justifyContent: 'space-between',
+    backgroundColor: 'rgba(245, 247, 250, 0.95)',
     shadowColor: '#000',
-    shadowOffset: { 
-      width: 0, 
-      height: 4
-    },
-    shadowOpacity: 0.08,
-    shadowRadius: 6,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(0,0,0,0.05)',
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 6
   },
   price: {
-    fontSize: height * 0.045,
+    fontSize: height * 0.035,
     fontWeight: 'bold',
     color: '#333',
+    marginBottom: 1
+  },
+  detailsContainer: {
+    flexDirection: 'row',
+    justifyContent: 'flex-start',
+    alignItems: 'center'
+  },
+  detailItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginRight: 12
   },
   details: {
-    fontSize: height * 0.028,
+    fontSize: height * 0.024,
     color: '#333',
-    marginTop: height * 0.01,
     fontWeight: '600',
+    marginLeft: 4
   },
   address: {
-    fontSize: height * 0.02,
-    color: '#333', // Changed from #999 to #333 to match other text
-    marginTop: height * 0.01,
-  },
-  swiperContainer: {
-    flex: 1,
-    paddingTop: height * 0.01, // 1% of screen height
-    paddingBottom: height * 0.01,
-    backgroundColor: '#fff', // Added white background
-  },
-  cardOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    borderRadius: 10,
-    opacity: 0, // Start transparent
+    fontSize: height * 0.021,
+    color: '#333'
   },
   overlay: {
     position: 'absolute',
@@ -742,21 +1833,201 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.3)',
     justifyContent: 'center',
     alignItems: 'center',
-    zIndex: 1000,
+    zIndex: 1000
   },
-  particle: {
+  heartSymbol: {
+    fontSize: height * 0.15,
+    color: '#FFFFFF',
+    fontWeight: 'bold'
+  },
+  statusBadge: {
     position: 'absolute',
+    top: 12,
+    right: 12,
+    width: 100,
+    height: 28,
+    padding: 4,
+    borderRadius: 4,
+    justifyContent: 'center',
+    alignItems: 'center'
+  },
+  statusText: {
+    fontSize: height * 0.018,
+    fontWeight: 'bold',
+    color: '#fff',
+    textAlign: 'center'
+  },
+  bottomRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 4
+  },
+  yearBuilt: {
+    fontSize: height * 0.018,
+    color: '#666',
+    flex: 1,
+    marginRight: 8
+  },
+  brokerageText: {
+    fontSize: height * 0.018,
+    color: '#666',
+    fontStyle: 'italic',
+    textAlign: 'right'
+  },
+  imageDots: {
+    position: 'absolute',
+    bottom: 10,
+    left: 10,
+    flexDirection: 'row',
+    alignItems: 'center'
+  },
+  imageDot: {
     width: 8,
     height: 8,
-    backgroundColor: '#FFFFFF', // Changed from gold to white
     borderRadius: 4,
+    backgroundColor: '#fff',
+    marginHorizontal: 2
   },
-  starSymbol: {
-    fontSize: height * 0.15, // Reduced from 0.2
-    color: '#FFFFFF',
+  skeletonCardsContainer: {
+    position: 'relative',
+    justifyContent: 'center',
+    alignItems: 'center',
+    height: CARD_HEIGHT,
+    width: width * 0.92,
+    marginTop: 30
+  },
+  skeletonCard: {
+    position: 'absolute',
+    width: width * 0.92,
+    height: CARD_HEIGHT,
+    backgroundColor: '#fff',
+    borderRadius: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 1.5,
+    elevation: 2,
+    overflow: 'hidden'
+  },
+  skeletonCardBottom: {
+    transform: [
+      { scale: 0.9 },
+      { translateY: 20 }
+    ],
+    zIndex: 1
+  },
+  skeletonCardMiddle: {
+    transform: [
+      { scale: 0.95 },
+      { translateY: 10 }
+    ],
+    zIndex: 2
+  },
+  skeletonCardTop: {
+    zIndex: 3
+  },
+  skeletonImageContainer: {
+    height: CARD_HEIGHT * 0.6,
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 10,
+    borderTopRightRadius: 10,
+    overflow: 'hidden',
+    padding: 5
+  },
+  skeletonImageRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    height: '100%'
+  },
+  skeletonMainImage: {
+    width: '60%',
+    height: '100%',
+    backgroundColor: '#f0f0f0',
+    borderRadius: 5,
+    marginRight: 5
+  },
+  skeletonSecondaryImagesContainer: {
+    width: '38%',
+    height: '100%',
+    flexDirection: 'column',
+    justifyContent: 'space-between'
+  },
+  skeletonSecondaryImage: {
+    width: '100%',
+    height: '48%',
+    backgroundColor: '#f0f0f0',
+    borderRadius: 5
+  },
+  skeletonDetails: {
+    flex: 1,
+    padding: 15
+  },
+  skeletonPrice: {
+    height: 30,
+    width: '50%',
+    backgroundColor: '#f0f0f0',
+    borderRadius: 4,
+    marginBottom: 15
+  },
+  skeletonDetailsRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-start',
+    alignItems: 'center',
+    marginBottom: 15
+  },
+  skeletonDetailItem: {
+    width: 70,
+    height: 24,
+    backgroundColor: '#f0f0f0',
+    borderRadius: 4,
+    marginRight: 15
+  },
+  skeletonAddress: {
+    height: 18,
+    width: '85%',
+    backgroundColor: '#f0f0f0',
+    borderRadius: 4,
+    marginBottom: 8
+  },
+  skeletonYearBuilt: {
+    height: 18,
+    width: '40%',
+    backgroundColor: '#f0f0f0',
+    borderRadius: 4
+  },
+  skeletonStatusBadge: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    width: 70,
+    height: 24,
+    backgroundColor: '#f0f0f0',
+    padding: 4,
+    borderRadius: 4
+  },
+  matchScoreContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#eee'
+  },
+  matchScoreLabel: {
+    fontSize: 14,
+    color: '#666',
+    marginRight: 4
+  },
+  matchScoreValue: {
+    fontSize: 16,
     fontWeight: 'bold',
+    color: '#fc565b'
   },
+  disabledButton: {
+    opacity: 0.5
+  }
 });
 
 export default HomeScreen;
- 
