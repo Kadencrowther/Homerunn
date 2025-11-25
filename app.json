@@ -1,14 +1,49 @@
 {
   "expo": {
+    "name": "Homerunn",
+    "slug": "homerunn",
+    "version": "3.1",
+    "orientation": "portrait",
+    "icon": "./assets/homerunnlogo.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/homerunnlogo.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.homerunn.app",
+      "buildNumber": "1",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSLocationWhenInUseUsageDescription": "This app uses location to find properties near you.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "This app uses location to find properties near you.",
+        "NSCameraUsageDescription": "This app uses camera to take photos of properties.",
+        "NSPhotoLibraryUsageDescription": "This app accesses photo library to select images."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/homerunnlogo.png",
+        "backgroundColor": "#ffffff"
+      }
+    },
+    "web": {
+      "favicon": "./assets/homerunnlogo.png"
+    },
+    "plugins": [
+      "expo-dev-client",
+      "expo-apple-authentication",
+      "expo-location",
+      "expo-notifications"
+    ],
     "extra": {
       "eas": {
         "projectId": "c9d6dcde-524c-4058-b8d0-2ba7c32d1219"
-      }
-    },
-    "ios": {
-      "bundleIdentifier": "com.kadencrowther.homerunn",
-      "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
       }
     }
   }

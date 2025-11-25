@@ -8,7 +8,8 @@
       "distribution": "internal",
       "ios": {
         "simulator": true,
-        "resourceClass": "m-medium"
+        "resourceClass": "m-medium",
+        "image": "macos-sonoma-14.6-xcode-16.1"
       },
       "env": {
         "EXPO_USE_DEV_SERVER": "1",
@@ -18,6 +19,14 @@
     "preview": {
       "distribution": "internal"
     },
-    "production": {}
+    "production": {
+      "ios": {
+        "resourceClass": "m-medium",
+        "image": "macos-sonoma-14.6-xcode-16.1"
+      },
+      "env": {
+        "USE_FRAMEWORKS": "static"
+      }
+    }
   }
 } 
