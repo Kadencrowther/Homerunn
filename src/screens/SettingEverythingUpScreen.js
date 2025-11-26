@@ -228,6 +228,10 @@ const SettingEverythingUpScreen = ({ navigation, route }) => {
         throw new Error('No authenticated user found when saving preferences');
       }
       
+      // Get notification data from params if it exists (collected during onboarding)
+      const notificationData = route.params?.notificationData;
+      console.log('Notification data from onboarding:', notificationData);
+      
       // Create user data object with all fields in PascalCase
       // Only include Credentials if they exist (email/password flow)
       const userData = {
@@ -241,8 +245,13 @@ const SettingEverythingUpScreen = ({ navigation, route }) => {
         MarketingSource,
         HasCompletedOnboarding: true,
         IsActive: true,
-        NotificationsEnabled: false, // Initialize notification preference
-        NotificationDevices: [], // Initialize empty devices array
+        // Include notification data if collected during onboarding
+        NotificationsEnabled: notificationData?.notificationsEnabled || false,
+        ...(notificationData?.pushToken && { 
+          DeviceNotificationToken: notificationData.pushToken,
+          AppNotificationsEnabled: true
+        }),
+        NotificationDevices: [], // Initialize empty devices array (will be populated by service)
         DateCreated: new Date().toISOString(),
         UserId: currentUser.uid,
         AuthId: currentUser.uid // Explicitly add Auth ID for clarity
@@ -286,9 +295,28 @@ const SettingEverythingUpScreen = ({ navigation, route }) => {
         console.log('🏠 Triggering context to show main app with tabs...');
         
         // Trigger the onboarding context to notify App.js
+        let hasNavigated = false;
         setTimeout(() => {
           completeOnboarding();
           console.log('✅ OnboardingContext triggered - App.js will now show AppNavigator with tabs');
+          
+          // Mark that we've initiated navigation
+          hasNavigated = true;
+          
+          // Fallback: If still on this screen after 3 seconds, manually navigate
+          setTimeout(() => {
+            // Only navigate if we're still on this screen (context navigation didn't work)
+            const currentRoute = navigation.getState().routes[navigation.getState().index];
+            if (currentRoute.name === 'SettingEverythingUp') {
+              console.log('⏰ Fallback: Context navigation did not work, manually navigating');
+              navigation.reset({
+                index: 0,
+                routes: [{ name: 'App' }],
+              });
+            } else {
+              console.log('✅ Navigation already happened via context - skipping fallback');
+            }
+          }, 3000);
         }, 1500);
         
       } catch (firestoreError) {
@@ -323,6 +351,21 @@ const SettingEverythingUpScreen = ({ navigation, route }) => {
           setTimeout(() => {
             completeOnboarding();
             console.log('✅ OnboardingContext triggered - App.js will now show AppNavigator with tabs');
+            
+            // Fallback: If still on this screen after 3 seconds, manually navigate
+            setTimeout(() => {
+              // Only navigate if we're still on this screen (context navigation didn't work)
+              const currentRoute = navigation.getState().routes[navigation.getState().index];
+              if (currentRoute.name === 'SettingEverythingUp') {
+                console.log('⏰ Fallback: Context navigation did not work, manually navigating');
+                navigation.reset({
+                  index: 0,
+                  routes: [{ name: 'App' }],
+                });
+              } else {
+                console.log('✅ Navigation already happened via context - skipping fallback');
+              }
+            }, 3000);
           }, 1500);
           
         } catch (retryError) {

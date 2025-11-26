@@ -242,7 +242,7 @@ const ProfileCompletionScreen = ({ navigation, route }) => {
     <KeyboardAvoidingView 
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 100 : 20}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
     >
       <StatusBar barStyle="dark-content" />
       
@@ -262,7 +262,6 @@ const ProfileCompletionScreen = ({ navigation, route }) => {
       
       <Animated.View style={[styles.headerContainer, headerAnimatedStyle]}>
         <Text style={styles.title}>Complete Your Profile</Text>
-        <Text style={styles.subtitle}>Help us personalize your experience</Text>
       </Animated.View>
 
       <ScrollView 
@@ -270,8 +269,9 @@ const ProfileCompletionScreen = ({ navigation, route }) => {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
-        keyboardDismissMode="on-drag"
+        keyboardDismissMode="interactive"
         scrollEnabled={true}
+        bounces={true}
       >
         <Animated.View style={[styles.formContainer, formAnimatedStyle]}>
           <View style={styles.inputGroup}>
@@ -415,15 +415,15 @@ const styles = StyleSheet.create({
     zIndex: 10,
   },
   headerContainer: {
-    marginTop: height * 0.03,
-    marginBottom: height * 0.02,
+    marginTop: height * 0.01,
+    marginBottom: height * 0.01,
     alignItems: 'center',
     paddingHorizontal: width * 0.08,
   },
   title: {
     fontSize: width * 0.075,
     fontWeight: '700',
-    marginBottom: height * 0.015,
+    marginBottom: 0,
     textAlign: 'center',
     color: '#333',
   },
@@ -443,12 +443,12 @@ const styles = StyleSheet.create({
     paddingBottom: height * 0.15,
   },
   inputGroup: {
-    marginBottom: height * 0.025,
+    marginBottom: height * 0.01,
   },
   inputLabel: {
-    fontSize: width * 0.04,
+    fontSize: width * 0.035,
     color: '#666',
-    marginBottom: height * 0.01,
+    marginBottom: height * 0.003,
     fontWeight: '500',
     flexDirection: 'row',
     alignItems: 'center',
@@ -474,22 +474,23 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
   },
   input: {
-    padding: height * 0.016,
+    padding: height * 0.013,
     fontSize: width * 0.04,
     color: '#333',
   },
   bottomContainer: {
-    marginTop: height * 0.02,
-    paddingBottom: height * 0.04,
-    width: '100%',
     paddingHorizontal: width * 0.05,
+    paddingBottom: height * 0.03,
+    paddingTop: height * 0.02,
+    width: '100%',
     alignItems: 'center',
+    backgroundColor: '#fff',
   },
   continueButton: {
     backgroundColor: '#fc565b',
-    paddingVertical: height * 0.018,
+    paddingVertical: height * 0.016,
     borderRadius: width * 0.02,
-    marginBottom: height * 0.02,
+    marginBottom: height * 0.012,
     width: '100%',
     alignItems: 'center',
     shadowColor: '#000',
@@ -512,7 +513,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   skipButton: {
-    paddingVertical: height * 0.01,
+    paddingVertical: height * 0.008,
     width: '100%',
     alignItems: 'center',
   },

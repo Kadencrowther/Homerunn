@@ -21,7 +21,8 @@ import Animated, {
   Easing
 } from 'react-native-reanimated';
 import ProgressBar from '../components/ProgressBar';
-import { enableNotifications } from '../services/NotificationService';
+import { deviceNotificationService } from '../services/deviceNotificationService';
+import { auth } from '../config/firebase';
 
 const { width, height } = Dimensions.get('window');
 
@@ -118,27 +119,64 @@ const NotificationSetupScreen = ({ navigation, route }) => {
       
       console.log('🔔 Requesting notification permissions...');
       
-      // Use the NotificationService to enable notifications
-      // This will request permissions, get the token, get device info, and save to Firestore
-      const success = await enableNotifications();
+      const userId = auth.currentUser?.uid;
       
-      if (success) {
-        console.log('✅ Notifications enabled successfully! Token and device info saved to Firestore.');
-        Alert.alert('Success!', 'Notifications enabled. You\'ll receive updates about new listings and price changes.');
+      if (userId) {
+        // User is already authenticated (Apple Sign In) - save directly to Firestore
+        console.log('✅ User authenticated - saving notifications directly');
+        const success = await deviceNotificationService.enableNotificationsForCurrentUser(userId);
+        
+        if (success) {
+          console.log('✅ Notifications enabled successfully!');
+          Alert.alert('Success!', 'Notifications enabled. You\'ll receive updates about new listings and price changes.');
+        } else {
+          console.log('⚠️ Notification permissions denied or failed');
+          Alert.alert('Notifications Not Enabled', 'You can enable notifications later in your profile settings.');
+        }
+        
+        navigation.navigate('Congratulations', route.params);
       } else {
-        console.log('⚠️ Notification permissions denied or failed');
-        Alert.alert('Notifications Not Enabled', 'You can enable notifications later in your profile settings.');
+        // User NOT authenticated yet (Email Sign In) - collect token and save in params
+        console.log('ℹ️ No user authenticated yet - collecting notification data for later');
+        
+        // Request permissions
+        const permissionGranted = await deviceNotificationService.requestPermissions();
+        console.log('📱 Permission granted:', permissionGranted);
+        
+        if (permissionGranted) {
+          // Get push token
+          let token = null;
+          try {
+            const tokenData = await Notifications.getExpoPushTokenAsync();
+            token = tokenData.data;
+            console.log('📱 Got push token for onboarding:', token?.substring(0, 20) + '...');
+          } catch (error) {
+            console.log('⚠️ Could not get push token:', error.message);
+          }
+          
+          // Pass notification data in params to be saved when account is created
+          const updatedParams = {
+            ...route.params,
+            notificationData: {
+              permissionsGranted: true,
+              pushToken: token,
+              notificationsEnabled: true
+            }
+          };
+          
+          console.log('✅ Notification permissions granted - will save when account is created');
+          Alert.alert('Success!', 'Notifications will be enabled when your account is created.');
+          navigation.navigate('Congratulations', updatedParams);
+        } else {
+          console.log('⚠️ Notification permissions denied');
+          Alert.alert('Notifications Not Enabled', 'You can enable notifications later in your profile settings.');
+          navigation.navigate('Congratulations', route.params);
+        }
       }
-      
-      // Navigate to congratulations screen regardless of permission outcome
-      console.log('NotificationSetupScreen passing params:', route.params);
-      navigation.navigate('Congratulations', route.params);
       
     } catch (error) {
       console.error('Notification error:', error);
       Alert.alert('Error', 'Something went wrong with notifications. You can enable them later in settings.');
-      
-      // Navigate to congratulations screen despite error
       navigation.navigate('Congratulations', route.params);
     }
   };

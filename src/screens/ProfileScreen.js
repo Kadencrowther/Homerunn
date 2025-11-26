@@ -3,13 +3,14 @@ import { View, Text, StyleSheet, TouchableOpacity, Modal, TextInput, Animated, S
 import { Ionicons } from '@expo/vector-icons';
 import { auth, db } from '../config/firebase';
 import { signOut, updateEmail, updatePassword, verifyBeforeUpdateEmail, EmailAuthProvider, reauthenticateWithCredential, deleteUser } from 'firebase/auth';
-import { doc, getDoc, updateDoc, addDoc, collection, serverTimestamp, deleteDoc } from 'firebase/firestore';
+import { doc, getDoc, updateDoc, addDoc, collection, serverTimestamp, deleteDoc, getDocs, query } from 'firebase/firestore';
 import { LinearGradient } from 'expo-linear-gradient';
 import Slider from '@react-native-community/slider';
 import MapView, { Circle, Marker } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { initializeUserMatchMetric } from '../utils/UserMatchMetric';
 import NotificationModal from '../components/NotificationModal';
+import Constants from 'expo-constants';
 
 const { width } = Dimensions.get('window');
 
@@ -354,25 +355,65 @@ const ProfileScreen = ({ navigation }) => {
         return;
       }
 
-      // Delete user document from Firestore
-      const userDocRef = doc(db, 'Users', userId);
-      await deleteDoc(userDocRef);
-      console.log('User document deleted from Firestore');
+      console.log('🗑️ Starting account deletion process for user:', userId);
+      
+      setIsDeactivateModalVisible(false);
 
-      // Delete Firebase Auth account
+      // Delete all related Firestore documents
+      try {
+        // 1. Delete main user document
+        const userDocRef = doc(db, 'Users', userId);
+        await deleteDoc(userDocRef);
+        console.log('✅ User document deleted from Firestore');
+
+        // 2. Delete UserMatchMetric document (if exists)
+        try {
+          const matchMetricRef = doc(db, 'UserMatchMetric', userId);
+          await deleteDoc(matchMetricRef);
+          console.log('✅ UserMatchMetric document deleted');
+        } catch (error) {
+          console.log('ℹ️ UserMatchMetric document may not exist, skipping');
+        }
+
+        // 3. Delete all Filters in the subcollection (if exists)
+        try {
+          const filtersRef = collection(db, 'Users', userId, 'Filters');
+          const filtersSnapshot = await getDocs(filtersRef);
+          
+          if (!filtersSnapshot.empty) {
+            console.log(`🗑️ Deleting ${filtersSnapshot.size} filter document(s)...`);
+            const deletePromises = filtersSnapshot.docs.map(filterDoc => 
+              deleteDoc(doc(db, 'Users', userId, 'Filters', filterDoc.id))
+            );
+            await Promise.all(deletePromises);
+            console.log('✅ All filter documents deleted');
+          } else {
+            console.log('ℹ️ No filter documents found');
+          }
+        } catch (error) {
+          console.log('ℹ️ Error deleting filters (may not exist):', error.message);
+        }
+
+      } catch (firestoreError) {
+        console.error('❌ Error deleting Firestore documents:', firestoreError);
+        throw firestoreError; // Re-throw to be caught by outer try-catch
+      }
+
+      // 4. Delete Firebase Auth account (this will trigger auth state change and navigate to Welcome)
       await deleteUser(auth.currentUser);
-      console.log('Firebase Auth account deleted');
+      console.log('✅ Firebase Auth account deleted');
       
       Alert.alert(
         'Account Deleted',
-        'Your account has been permanently deleted.',
+        'Your account and all associated data have been permanently deleted.',
         [{ text: 'OK' }]
       );
       
       // User is automatically signed out when account is deleted
+      // Auth state listener will navigate to Welcome screen
       
     } catch (error) {
-      console.error('Error deactivating account:', error);
+      console.error('❌ Error deleting account:', error);
       
       // If error is due to requiring recent login, inform the user
       if (error.code === 'auth/requires-recent-login') {
@@ -384,6 +425,7 @@ const ProfileScreen = ({ navigation }) => {
             { 
               text: 'Sign Out', 
               onPress: async () => {
+                console.log('🚪 Signing out for re-authentication...');
                 await signOut(auth);
               }
             }
@@ -397,11 +439,14 @@ const ProfileScreen = ({ navigation }) => {
 
   const handleSignOut = async () => {
     try {
-      await signOut(auth);
+      console.log('🚪 User clicked sign out - signing out now...');
       setIsSignOutModalVisible(false);
+      await signOut(auth);
+      console.log('✅ Sign out successful - auth state listener will handle navigation');
       // Auth state change will automatically redirect to setup/login
     } catch (error) {
-      console.error('Error signing out:', error);
+      console.error('❌ Error signing out:', error);
+      Alert.alert('Error', 'Failed to sign out. Please try again.');
     }
   };
 
@@ -1448,7 +1493,7 @@ const ProfileScreen = ({ navigation }) => {
         </Modal>
 
         {/* App Version */}
-        <Text style={styles.versionText}>ver 1</Text>
+        <Text style={styles.versionText}>Version {Constants.expoConfig?.version || '3.1.1'} ({Constants.expoConfig?.ios?.buildNumber || '2'})</Text>
       </ScrollView>
     </SafeAreaView>
   );

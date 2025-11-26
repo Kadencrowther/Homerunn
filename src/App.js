@@ -16,6 +16,8 @@ const Stack = createStackNavigator();
 
 const NavigationWrapper = () => {
   const [initializing, setInitializing] = useState(true);
+  const [authChecked, setAuthChecked] = useState(false);
+  const [firestoreChecked, setFirestoreChecked] = useState(false);
   const [user, setUser] = useState(null);
   const [hasCompletedOnboarding, setHasCompletedOnboarding] = useState(false);
   const [splashComplete, setSplashComplete] = useState(false);
@@ -50,43 +52,62 @@ const NavigationWrapper = () => {
           
           // Only set user if they're fully authenticated
           if (user.emailVerified || user.providerData.length > 0) {
+            const onboardingStatus = userData?.HasCompletedOnboarding || false;
+            console.log('✅ User authenticated. Onboarding complete:', onboardingStatus);
+            console.log('📍 Navigation decision: Show', onboardingStatus ? 'MAIN APP' : 'ONBOARDING');
+            console.log('🔧 Setting firestoreChecked and authChecked to true');
+            // Batch all state updates together
             setUser(user);
-            setHasCompletedOnboarding(userData?.HasCompletedOnboarding || false);
-            console.log('✅ User authenticated. Onboarding complete:', userData?.HasCompletedOnboarding || false);
-            console.log('📍 Navigation decision: Show', userData?.HasCompletedOnboarding ? 'MAIN APP' : 'ONBOARDING');
+            setHasCompletedOnboarding(onboardingStatus);
+            setFirestoreChecked(true);
+            setAuthChecked(true);
           } else {
             console.log('❌ User not fully authenticated (no email verified or providers)');
+            console.log('🔧 Setting firestoreChecked and authChecked to true');
             setUser(null);
             setHasCompletedOnboarding(false);
+            setFirestoreChecked(true);
+            setAuthChecked(true);
             console.log('📍 Navigation decision: Show ONBOARDING');
           }
         } catch (error) {
           console.error('❌ Error checking onboarding status:', error);
+          console.log('📍 Navigation decision (after error): Show ONBOARDING');
+          console.log('🔧 Setting firestoreChecked and authChecked to true');
           setUser(user);
           setHasCompletedOnboarding(false);
-          console.log('📍 Navigation decision (after error): Show ONBOARDING');
+          setFirestoreChecked(true);
+          setAuthChecked(true);
         }
       } else {
-        console.log('❌ No user authenticated');
+        console.log('❌ No user authenticated (signed out or never signed in)');
+        console.log('📍 Navigation decision: Show ONBOARDING (Welcome screen)');
+        console.log('🔧 Resetting all state - setting user to null, onboarding to false');
+        // Reset ALL state immediately when user signs out
         setUser(null);
         setHasCompletedOnboarding(false);
-        console.log('📍 Navigation decision: Show ONBOARDING (Welcome screen)');
+        setFirestoreChecked(true);
+        setAuthChecked(true);
       }
-
-      // Ensure we move past the splash screen even if animation fails
-      const timer = setTimeout(() => {
-        console.log('⏰ Safety timeout reached, setting initializing to false');
-        setInitializing(false);
-      }, 5000); // Safety timeout
-
-      return () => clearTimeout(timer);
     });
 
-    return () => unsubscribe();
+    // Safety timeout - mark both auth and firestore as checked if taking too long
+    const timer = setTimeout(() => {
+      console.log('⏰ Safety timeout reached - marking auth and firestore as checked');
+      setFirestoreChecked(true);
+      setAuthChecked(true);
+    }, 5000);
+
+    return () => {
+      unsubscribe();
+      clearTimeout(timer);
+    };
   }, []);
   
   // Also watch for onboarding completion from context
   useEffect(() => {
+    console.log('🔔 Onboarding completion watcher triggered. onboardingComplete:', onboardingComplete, ', user:', !!user);
+    
     if (onboardingComplete && user) {
       console.log('🎉 Onboarding marked as complete from context, re-checking Firestore...');
       // Re-check the Firestore document
@@ -99,13 +120,18 @@ const NavigationWrapper = () => {
           if (userData?.HasCompletedOnboarding) {
             console.log('✅ Re-checked onboarding status: true');
             console.log('🔄 Updating state to show main app...');
+            // Batch updates
             setHasCompletedOnboarding(true);
+            setFirestoreChecked(true);
             
-            // Navigate to App screen
+            // Reset navigation stack and navigate to App screen
             setTimeout(() => {
               if (navigationRef.current) {
-                console.log('🚀 Navigating to App screen with tabs');
-                navigationRef.current.navigate('App');
+                console.log('🚀 Resetting navigation to App screen with tabs');
+                navigationRef.current.reset({
+                  index: 0,
+                  routes: [{ name: 'App' }],
+                });
               }
             }, 500);
           } else {
@@ -120,34 +146,59 @@ const NavigationWrapper = () => {
     }
   }, [onboardingComplete, user]);
 
-  // If either the splash animation completes OR the auth state is determined AND min time passed,
-  // we should exit the splash screen
-  const shouldShowApp = !initializing || splashComplete;
+  // Watch for user sign out and force navigation to Welcome screen
+  useEffect(() => {
+    if (!user && authChecked && firestoreChecked && !initializing && navigationRef.current) {
+      console.log('🚪 User signed out detected - forcing navigation to Welcome screen');
+      setTimeout(() => {
+        if (navigationRef.current) {
+          navigationRef.current.reset({
+            index: 0,
+            routes: [{ name: 'Setup' }],
+          });
+          console.log('✅ Navigated to Setup (Welcome screen)');
+        }
+      }, 100);
+    }
+  }, [user, authChecked, firestoreChecked, initializing]);
 
   const handleSplashComplete = () => {
+    console.log('✅ Splash animation complete!');
     // Mark splash animation as complete
     setSplashComplete(true);
     
     // Give a slight delay after animation before moving on
     setTimeout(() => {
+      console.log('✅ Moving to main navigation after splash');
       setInitializing(false);
     }, 250);
   };
 
+  // ALWAYS show splash until animation is complete, regardless of auth state
+  // Only show app when splash is complete AND auth is checked AND firestore is checked
+  const shouldShowApp = splashComplete && authChecked && firestoreChecked && !initializing;
+
   if (!shouldShowApp) {
-    console.log('🎬 Showing splash screen');
+    console.log('🎬 Showing splash screen (splashComplete:', splashComplete, ', authChecked:', authChecked, ', firestoreChecked:', firestoreChecked, ', initializing:', initializing, ')');
     return <SplashScreen onAnimationComplete={handleSplashComplete} />;
   }
 
   console.log('🚀 Ready to show app. Checking navigation...');
   console.log('  - User exists:', !!user);
   console.log('  - Has completed onboarding:', hasCompletedOnboarding);
-  console.log('  - Decision:', user && hasCompletedOnboarding ? 'AppNavigator (Main App)' : 'SetupNavigator (Onboarding)');
+  
+  // Determine which navigator to show
+  // IMPORTANT: No user = ALWAYS show welcome/onboarding, regardless of hasCompletedOnboarding
+  const showMainApp = !!user && hasCompletedOnboarding;
+  console.log('  - Decision:', showMainApp ? 'AppNavigator (Main App)' : 'SetupNavigator (Onboarding/Welcome)');
 
   return (
     <NavigationContainer ref={navigationRef}>
-      <Stack.Navigator screenOptions={{ headerShown: false }}>
-        {user && hasCompletedOnboarding ? (
+      <Stack.Navigator 
+        screenOptions={{ headerShown: false }}
+        initialRouteName={showMainApp ? 'App' : 'Setup'}
+      >
+        {showMainApp ? (
           // User is fully authenticated AND has completed onboarding - show main app
           <>
             {console.log('✅ Rendering AppNavigator (Main App with tabs)')}
@@ -157,7 +208,7 @@ const NavigationWrapper = () => {
         ) : (
           // No user OR incomplete onboarding - show welcome/onboarding flow
           <>
-            {console.log('📝 Rendering SetupNavigator (Onboarding flow)')}
+            {console.log('📝 Rendering SetupNavigator (Onboarding/Welcome flow)')}
             <Stack.Screen name="Setup" component={SetupNavigator} />
             <Stack.Screen name="App" component={AppNavigator} />
           </>

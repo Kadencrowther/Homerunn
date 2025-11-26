@@ -35,7 +35,7 @@ const getPathLength = (path) => {
   return parts.length * 50;
 };
 
-const SplashScreen = ({ navigation }) => {
+const SplashScreen = ({ navigation, onAnimationComplete }) => {
   // Animation progress values for each path
   const outlineProgress = useSharedValue(0);
   const doorProgress = useSharedValue(0);
@@ -59,25 +59,31 @@ const SplashScreen = ({ navigation }) => {
   useEffect(() => {
     console.log('Splash screen mounted, animation completed:', splashAnimationCompleted);
     
-    // If splash has already run in a previous mount, navigate immediately
-    if (splashHasRun && navigation) {
-      console.log('Splash already ran once, skipping to Welcome');
-      navigation.navigate('Welcome');
-      return;
-    }
-    
-    // If animation has already completed but we haven't navigated yet,
-    // just show the final state without animating
-    if (splashAnimationCompleted) {
-      console.log('Animation already completed, showing final state');
-      return; // Skip all animations, just show the final logo state
+    // Always play the animation if we have a completion callback
+    // (This means App.js is controlling the flow, not internal navigation)
+    if (onAnimationComplete) {
+      console.log('Starting splash animation with completion callback');
+    } else {
+      // Legacy navigation mode - check if already ran
+      if (splashHasRun && navigation) {
+        console.log('Splash already ran once, skipping to Welcome');
+        navigation.navigate('Welcome');
+        return;
+      }
+      
+      // If animation has already completed but we haven't navigated yet,
+      // just show the final state without animating
+      if (splashAnimationCompleted) {
+        console.log('Animation already completed, showing final state');
+        return;
+      }
     }
     
     // Mark that splash has run
     splashHasRun = true;
     
     // Start drawing animation sequence
-    console.log('Starting splash animation for the first time');
+    console.log('Starting splash animation');
     
     // 1. Draw house outline
     outlineProgress.value = withTiming(1, { 
@@ -120,15 +126,18 @@ const SplashScreen = ({ navigation }) => {
       // Mark animation as completed
       splashAnimationCompleted = true;
       
-      // Navigate to Welcome screen after logo is fully visible
+      // Call completion callback after logo is fully visible
       setTimeout(() => {
-        if (navigation) {
-          console.log('Animation complete, navigating to Welcome screen');
+        console.log('Animation complete, calling completion callback');
+        if (onAnimationComplete) {
+          onAnimationComplete();
+        } else if (navigation) {
+          // Fallback to navigation if callback not provided
           navigation.navigate('Welcome');
         }
       }, 1200);
     }, 3100);
-  }, [navigation]);
+  }, [navigation, onAnimationComplete]);
 
   // Animated props for the SVG paths
   const outlineAnimatedProps = useAnimatedProps(() => ({

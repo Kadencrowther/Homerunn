@@ -17,8 +17,11 @@ import Animated, {
   useSharedValue, 
   useAnimatedStyle, 
   withTiming, 
-  withDelay
+  withDelay,
+  withRepeat,
+  Easing
 } from 'react-native-reanimated';
+import { LinearGradient } from 'expo-linear-gradient';
 import MapView, { Circle, Marker } from 'react-native-maps';
 import * as Location from 'expo-location';
 import ProgressBar from '../components/ProgressBar';
@@ -33,7 +36,7 @@ const { width, height } = Dimensions.get('window');
 const CURRENT_STEP = 5;
 const TOTAL_STEPS = 10;
 
-const DEFAULT_RADIUS = 5;
+const DEFAULT_RADIUS = 35;
 const MIN_RADIUS = 1;
 const MAX_RADIUS = 50;
 
@@ -57,6 +60,7 @@ const LocationScreen = ({ navigation, route }) => {
   const contentOpacity = useSharedValue(0);
   const sliderOpacity = useSharedValue(0);
   const buttonsOpacity = useSharedValue(0);
+  const shimmerTranslate = useSharedValue(-1);
 
   const headerAnimatedStyle = useAnimatedStyle(() => ({
       opacity: headerOpacity.value,
@@ -79,10 +83,21 @@ const LocationScreen = ({ navigation, route }) => {
       transform: [{ translateY: (1 - buttonsOpacity.value) * 20 }]
   }));
 
+  const shimmerAnimatedStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: shimmerTranslate.value * (width + 100) }]
+  }));
+
   useEffect(() => {
     headerOpacity.value = withTiming(1, { duration: 800 });
     contentOpacity.value = withDelay(300, withTiming(1, { duration: 800 }));
     buttonsOpacity.value = withDelay(500, withTiming(1, { duration: 800 }));
+    
+    // Start shimmer animation
+    shimmerTranslate.value = withRepeat(
+      withTiming(1, { duration: 1500, easing: Easing.linear }),
+      -1,
+      false
+    );
   }, []);
 
   useEffect(() => {
@@ -324,6 +339,57 @@ const LocationScreen = ({ navigation, route }) => {
           )}
         </Animated.View>
         
+        {/* Loading Skeleton for Map and Radius */}
+        {selectedCity && !mapRegion && (
+          <Animated.View style={[styles.radiusContainer, sliderAnimatedStyle]}>
+            <View style={styles.skeletonLabelContainer}>
+              <View style={styles.skeletonLabel}>
+                <Animated.View style={[styles.shimmerOverlay, shimmerAnimatedStyle]}>
+                  <LinearGradient
+                    colors={['transparent', 'rgba(255,255,255,0.5)', 'transparent']}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 0 }}
+                    style={styles.shimmerGradient}
+                  />
+                </Animated.View>
+              </View>
+              <View style={styles.skeletonValue}>
+                <Animated.View style={[styles.shimmerOverlay, shimmerAnimatedStyle]}>
+                  <LinearGradient
+                    colors={['transparent', 'rgba(255,255,255,0.5)', 'transparent']}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 0 }}
+                    style={styles.shimmerGradient}
+                  />
+                </Animated.View>
+              </View>
+            </View>
+            
+            <View style={styles.skeletonSlider}>
+              <Animated.View style={[styles.shimmerOverlay, shimmerAnimatedStyle]}>
+                <LinearGradient
+                  colors={['transparent', 'rgba(255,255,255,0.5)', 'transparent']}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
+                  style={styles.shimmerGradient}
+                />
+              </Animated.View>
+            </View>
+            
+            <View style={styles.skeletonMap}>
+              <Animated.View style={[styles.shimmerOverlay, shimmerAnimatedStyle]}>
+                <LinearGradient
+                  colors={['transparent', 'rgba(255,255,255,0.5)', 'transparent']}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
+                  style={styles.shimmerGradient}
+                />
+              </Animated.View>
+            </View>
+          </Animated.View>
+        )}
+        
+        {/* Actual Map and Radius Controls */}
         {selectedCity && mapRegion && (
         <Animated.View style={[styles.radiusContainer, sliderAnimatedStyle]}>
           <View style={styles.radiusLabelContainer}>
@@ -540,6 +606,49 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontSize: width * 0.04,
     fontWeight: '500',
+  },
+  // Skeleton Loading Styles
+  skeletonLabelContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  skeletonLabel: {
+    width: '40%',
+    height: 18,
+    backgroundColor: '#e0e0e0',
+    borderRadius: 4,
+    overflow: 'hidden',
+  },
+  skeletonValue: {
+    width: '20%',
+    height: 18,
+    backgroundColor: '#e0e0e0',
+    borderRadius: 4,
+    overflow: 'hidden',
+  },
+  skeletonSlider: {
+    width: '100%',
+    height: 40,
+    backgroundColor: '#e0e0e0',
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  skeletonMap: {
+    height: 200,
+    borderRadius: 10,
+    backgroundColor: '#e0e0e0',
+    marginTop: 15,
+    overflow: 'hidden',
+  },
+  shimmerOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    width: 100,
+  },
+  shimmerGradient: {
+    flex: 1,
+    width: 100,
   },
 });
 

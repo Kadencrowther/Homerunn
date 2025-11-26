@@ -10,24 +10,21 @@ import {
   ActivityIndicator,
   Platform,
   Switch,
-  Linking,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { auth } from '../config/firebase';
 import {
-  getUserDevices,
+  getRegisteredDevices,
   enableNotifications,
   disableNotifications,
   areNotificationsEnabled,
-  enableAllNotifications,
-  disableAllNotifications,
-  getCurrentDeviceToken,
+  removeDeviceToken,
 } from '../services/NotificationService';
 
 const NotificationModal = ({ visible, onClose }) => {
   const [devices, setDevices] = useState([]);
   const [loading, setLoading] = useState(true);
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
-  const [currentDeviceToken, setCurrentDeviceToken] = useState(null);
 
   useEffect(() => {
     if (visible) {
@@ -38,20 +35,24 @@ const NotificationModal = ({ visible, onClose }) => {
   const loadNotificationData = async () => {
     setLoading(true);
     try {
-      const [devicesData, enabled, currentToken] = await Promise.all([
-        getUserDevices(),
-        areNotificationsEnabled(),
-        getCurrentDeviceToken(),
+      const userId = auth.currentUser?.uid;
+      if (!userId) {
+        console.warn('No user authenticated');
+        setLoading(false);
+        return;
+      }
+
+      const [devicesData, enabled] = await Promise.all([
+        getRegisteredDevices(userId),
+        areNotificationsEnabled(userId),
       ]);
       
       setDevices(devicesData);
       setNotificationsEnabled(enabled);
-      setCurrentDeviceToken(currentToken);
       
       console.log('Loaded notification data:', {
         devices: devicesData.length,
         enabled,
-        currentToken: currentToken ? 'exists' : 'none',
       });
     } catch (error) {
       console.error('Error loading notification data:', error);
@@ -63,19 +64,19 @@ const NotificationModal = ({ visible, onClose }) => {
   const handleEnableNotifications = async () => {
     try {
       setLoading(true);
-      const success = await enableNotifications();
+      const userId = auth.currentUser?.uid;
+      if (!userId) {
+        Alert.alert('Error', 'You must be signed in to enable notifications');
+        return;
+      }
+
+      const success = await enableNotifications(userId);
       
       if (success) {
         Alert.alert('Success', 'Notifications enabled for this device');
         await loadNotificationData();
       } else {
-        Alert.alert(
-          'Note',
-          'Notification permissions could not be obtained. On simulator, a mock token will be used for testing.',
-          [{ text: 'OK' }]
-        );
-        // Still reload data as simulator will have a mock token
-        await loadNotificationData();
+        Alert.alert('Error', 'Failed to enable notifications. Please try again.');
       }
     } catch (error) {
       console.error('Error enabling notifications:', error);
@@ -97,7 +98,13 @@ const NotificationModal = ({ visible, onClose }) => {
           onPress: async () => {
             try {
               setLoading(true);
-              const success = await disableNotifications(token);
+              const userId = auth.currentUser?.uid;
+              if (!userId) {
+                Alert.alert('Error', 'You must be signed in');
+                return;
+              }
+
+              const success = await removeDeviceToken(userId, token);
               
               if (success) {
                 Alert.alert('Success', 'Device removed from notifications');
@@ -120,7 +127,12 @@ const NotificationModal = ({ visible, onClose }) => {
   const handleToggleAllNotifications = async (value) => {
     try {
       setLoading(true);
-      
+      const userId = auth.currentUser?.uid;
+      if (!userId) {
+        Alert.alert('Error', 'You must be signed in');
+        return;
+      }
+
       if (value) {
         // If no devices registered, prompt to register this device
         if (devices.length === 0) {
@@ -140,11 +152,15 @@ const NotificationModal = ({ visible, onClose }) => {
           return;
         }
         
-        await enableAllNotifications();
-        Alert.alert('Success', 'Notifications enabled on all devices');
+        const success = await enableNotifications(userId);
+        if (success) {
+          Alert.alert('Success', 'Notifications enabled');
+        }
       } else {
-        await disableAllNotifications();
-        Alert.alert('Success', 'Notifications disabled on all devices');
+        const success = await disableNotifications(userId);
+        if (success) {
+          Alert.alert('Success', 'Notifications disabled');
+        }
       }
       
       await loadNotificationData();
@@ -156,9 +172,19 @@ const NotificationModal = ({ visible, onClose }) => {
     }
   };
 
-  const formatDate = (dateString) => {
-    if (!dateString) return 'Unknown';
-    const date = new Date(dateString);
+  const formatDate = (dateValue) => {
+    if (!dateValue) return 'Unknown';
+    
+    // Handle Firestore Timestamp objects
+    let date;
+    if (dateValue.toDate && typeof dateValue.toDate === 'function') {
+      date = dateValue.toDate();
+    } else if (dateValue.seconds) {
+      date = new Date(dateValue.seconds * 1000);
+    } else {
+      date = new Date(dateValue);
+    }
+    
     return date.toLocaleDateString('en-US', {
       month: 'short',
       day: 'numeric',
@@ -168,14 +194,12 @@ const NotificationModal = ({ visible, onClose }) => {
     });
   };
 
-  const getDeviceIcon = (deviceOS) => {
-    if (deviceOS === 'ios') return 'phone-portrait';
-    if (deviceOS === 'android') return 'phone-portrait-outline';
+  const getDeviceIcon = (platform) => {
+    if (!platform) return 'phone-portrait';
+    const os = platform.toLowerCase();
+    if (os === 'ios') return 'phone-portrait';
+    if (os === 'android') return 'phone-portrait-outline';
     return 'tablet-portrait';
-  };
-
-  const isCurrentDevice = (token) => {
-    return currentDeviceToken && token === currentDeviceToken;
   };
 
   return (
@@ -247,35 +271,28 @@ const NotificationModal = ({ visible, onClose }) => {
                       <View style={styles.deviceHeader}>
                         <View style={styles.deviceIconContainer}>
                           <Ionicons
-                            name={getDeviceIcon(device.DeviceOS)}
+                            name={getDeviceIcon(device.Platform || device.DeviceOS)}
                             size={24}
                             color="#FC565B"
                           />
                         </View>
                         <View style={styles.deviceInfo}>
-                          <View style={styles.deviceNameRow}>
-                            <Text style={styles.deviceName}>{device.DeviceName}</Text>
-                            {isCurrentDevice(device.Token) && (
-                              <View style={styles.currentDeviceBadge}>
-                                <Text style={styles.currentDeviceText}>This Device</Text>
-                              </View>
-                            )}
-                          </View>
+                          <Text style={styles.deviceName}>{device.DeviceName}</Text>
                           <Text style={styles.deviceModel}>
-                            {device.DeviceModel} • {device.DeviceOS.toUpperCase()} {device.DeviceOSVersion}
+                            {device.ModelName || device.DeviceModel} • {(device.Platform || device.DeviceOS || 'unknown').toUpperCase()}
                           </Text>
-                          {device.DeviceManufacturer && device.DeviceManufacturer !== 'Unknown' && (
+                          {(device.DeviceManufacturer) && device.DeviceManufacturer !== 'Unknown' && (
                             <Text style={styles.deviceManufacturer}>
                               {device.DeviceManufacturer}
                             </Text>
                           )}
                           <Text style={styles.deviceDate}>
-                            Registered {formatDate(device.RegisteredAt)}
+                            Registered {formatDate(device.AddedAt || device.RegisteredAt)}
                           </Text>
                         </View>
                       </View>
 
-                      {/* Token Display (Expandable) */}
+                      {/* Token Display */}
                       <View style={styles.tokenContainer}>
                         <Text style={styles.tokenLabel}>Token:</Text>
                         <Text style={styles.tokenText} numberOfLines={2} ellipsizeMode="middle">
@@ -298,16 +315,14 @@ const NotificationModal = ({ visible, onClose }) => {
               </View>
 
               {/* Add Current Device Button */}
-              {!devices.some(d => isCurrentDevice(d.Token)) && (
-                <TouchableOpacity
-                  style={styles.addDeviceButton}
-                  onPress={handleEnableNotifications}
-                  disabled={loading}
-                >
-                  <Ionicons name="add-circle" size={24} color="#fff" />
-                  <Text style={styles.addDeviceText}>Enable on This Device</Text>
-                </TouchableOpacity>
-              )}
+              <TouchableOpacity
+                style={styles.addDeviceButton}
+                onPress={handleEnableNotifications}
+                disabled={loading}
+              >
+                <Ionicons name="add-circle" size={24} color="#fff" />
+                <Text style={styles.addDeviceText}>Enable on This Device</Text>
+              </TouchableOpacity>
 
               {/* Info Section */}
               <View style={styles.infoSection}>
@@ -453,27 +468,11 @@ const styles = StyleSheet.create({
   deviceInfo: {
     flex: 1,
   },
-  deviceNameRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 4,
-  },
   deviceName: {
     fontSize: 16,
     fontWeight: '600',
     color: '#333',
-    marginRight: 8,
-  },
-  currentDeviceBadge: {
-    backgroundColor: '#FC565B',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 8,
-  },
-  currentDeviceText: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: '#fff',
+    marginBottom: 4,
   },
   deviceModel: {
     fontSize: 13,
@@ -556,4 +555,3 @@ const styles = StyleSheet.create({
 });
 
 export default NotificationModal;
-
