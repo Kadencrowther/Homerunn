@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { createStackNavigator } from '@react-navigation/stack';
 import WelcomeScreen from '../screens/WelcomScreen';
 import AccountCreationScreen from '../screens/AccountCreationScreen';
@@ -16,6 +16,8 @@ import CongratulationsScreen from '../screens/CongratulationsScreen';
 import SettingEverythingUpScreen from '../screens/SettingEverythingUpScreen';
 import SplashScreen from '../screens/SplashScreen';
 import HomeScreen from '../screens/HomeScreen';
+import { auth, db } from '../config/firebase';
+import { doc, getDoc } from 'firebase/firestore';
 
 // Import the flag from SplashScreen
 import { splashHasRun } from '../screens/SplashScreen';
@@ -55,9 +57,48 @@ const splashToWelcomeTransition = {
 };
 
 const SetupNavigator = () => {
-  // Always start with Splash on first load, afterwards SetupNavigator won't be used
-  // for authenticated users (they'll go to the main tab navigator)
-  const initialRoute = 'Splash';
+  const [initialRoute, setInitialRoute] = useState('Splash');
+  const [isChecking, setIsChecking] = useState(true);
+  
+  useEffect(() => {
+    // Check if user is authenticated but hasn't completed onboarding
+    const checkUserStatus = async () => {
+      const currentUser = auth.currentUser;
+      
+      if (currentUser) {
+        try {
+          const userDocRef = doc(db, 'Users', currentUser.uid);
+          const userDoc = await getDoc(userDocRef);
+          const userData = userDoc.data();
+          
+          // If user exists but hasn't completed onboarding, skip splash and welcome
+          if (userData && !userData.HasCompletedOnboarding) {
+            console.log('🎯 SetupNavigator: User authenticated but onboarding incomplete, starting at UserInfo');
+            setInitialRoute('UserInfo');
+          } else {
+            console.log('🎯 SetupNavigator: User authenticated and onboarding complete, starting at Welcome');
+            setInitialRoute('Welcome');
+          }
+        } catch (error) {
+          console.error('Error checking user onboarding status:', error);
+          console.log('🎯 SetupNavigator: Error checking user, starting at Welcome');
+          setInitialRoute('Welcome');
+        }
+      } else {
+        console.log('🎯 SetupNavigator: No user found, starting at Welcome (skip Splash)');
+        setInitialRoute('Welcome');
+      }
+      
+      setIsChecking(false);
+    };
+    
+    checkUserStatus();
+  }, []);
+  
+  // Show nothing while checking (very brief)
+  if (isChecking) {
+    return null;
+  }
   
   return (
     <Stack.Navigator

@@ -47,6 +47,9 @@ service cloud.firestore {
       // Allow update if the user is authenticated and the document belongs to them
       allow update: if request.auth != null && request.auth.uid == userId;
       
+      // Allow delete if the user is authenticated and the document belongs to them
+      allow delete: if request.auth != null && request.auth.uid == userId;
+      
       // Allow access to Filters subcollection
       match /Filters/{filterId} {
         allow read, write: if request.auth != null && request.auth.uid == userId;

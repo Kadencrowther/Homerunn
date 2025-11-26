@@ -5,11 +5,14 @@ import {
   StyleSheet, 
   ActivityIndicator,
   Dimensions,
-  StatusBar
+  StatusBar,
+  Platform
 } from 'react-native';
 import { createUserWithEmailAndPassword, signInWithEmailAndPassword } from 'firebase/auth';
 import { setDoc, doc, collection } from 'firebase/firestore';
 import { auth, db } from '../config/firebase';
+import { CommonActions } from '@react-navigation/native';
+import { useOnboarding } from '../context/OnboardingContext';
 import Animated, { 
   useSharedValue, 
   useAnimatedStyle, 
@@ -24,6 +27,8 @@ const { width, height } = Dimensions.get('window');
 
 const SettingEverythingUpScreen = ({ navigation, route }) => {
   const [statusMessage, setStatusMessage] = useState('Initializing...');
+  const { completeOnboarding } = useOnboarding();
+  
   // Extract all parameters from the navigation chain
   const params = route.params || {};
   
@@ -38,10 +43,11 @@ const SettingEverythingUpScreen = ({ navigation, route }) => {
   const agentName = params.agentName || null;
   
   // Create PascalCase versions of all parameters for database consistency
-  const Credentials = {
-    Email: credentials?.email,
-    Password: credentials?.password
-  };
+  // Only include Credentials if email and password exist (email/password sign up flow)
+  const Credentials = credentials?.email && credentials?.password ? {
+    Email: credentials.email,
+    Password: credentials.password
+  } : null;
   
   // Convert profile fields to PascalCase
   const Profile = {
@@ -77,7 +83,7 @@ const SettingEverythingUpScreen = ({ navigation, route }) => {
   // Log the data we received for debugging in a more detailed format using PascalCase
   console.log("SettingEverythingUpScreen detailed params check:", { 
     HasCredentials: !!Credentials,
-    Email: Credentials?.Email || "Not provided",
+    Email: Credentials?.Email || "Not provided (Apple Sign In or no email)",
     HasPassword: !!Credentials?.Password,
     Profile: Profile,
     PreferencesCount: Preferences?.length || 0,
@@ -131,10 +137,22 @@ const SettingEverythingUpScreen = ({ navigation, route }) => {
   
   const setupUserAccount = async () => {
     try {
-      // Step 1: Create user account
-      await createUserAccount();
+      // Check if user is already authenticated (e.g., from Apple Sign In)
+      const currentUser = auth.currentUser;
       
-      // Step 2: Set up user preferences
+      if (!currentUser) {
+        // Step 1: Create user account (only if not already authenticated)
+        console.log('No authenticated user found, creating account with email/password');
+        await createUserAccount();
+      } else {
+        // User is already authenticated (from Apple Sign In or other method)
+        console.log('User already authenticated:', currentUser.uid);
+        console.log('Auth provider:', currentUser.providerData[0]?.providerId || 'unknown');
+        setStatusMessage('Account already authenticated, setting up your profile...');
+        isAuthComplete.current = true;
+      }
+      
+      // Step 2: Set up user preferences (merge with existing document if needed)
       await setupUserPreferences();
       
       // Log completion but don't navigate
@@ -211,8 +229,9 @@ const SettingEverythingUpScreen = ({ navigation, route }) => {
       }
       
       // Create user data object with all fields in PascalCase
+      // Only include Credentials if they exist (email/password flow)
       const userData = {
-        Credentials,
+        ...(Credentials && { Credentials }), // Only add if not null
         Profile,
         Preferences,
         Timeframe,
@@ -220,20 +239,28 @@ const SettingEverythingUpScreen = ({ navigation, route }) => {
         HasAgent,
         AgentName,
         MarketingSource,
+        HasCompletedOnboarding: true,
+        IsActive: true,
+        NotificationsEnabled: false, // Initialize notification preference
+        NotificationDevices: [], // Initialize empty devices array
         DateCreated: new Date().toISOString(),
         UserId: currentUser.uid,
         AuthId: currentUser.uid // Explicitly add Auth ID for clarity
       };
       
       console.log('User data prepared for database in PascalCase:', userData);
+      console.log('Credentials included:', !!Credentials);
       console.log('Firebase Auth User ID saved to document:', currentUser.uid);
       setStatusMessage('Saving your profile to our database...');
       
       try {
         // Save to Firestore in the Users collection
         const userDocRef = doc(db, 'Users', currentUser.uid);
-        await setDoc(userDocRef, userData);
-        console.log('User data successfully saved to Firestore!');
+        
+        // Use merge: true to update existing document (from Apple Sign In) or create if it doesn't exist
+        await setDoc(userDocRef, userData, { merge: true });
+        console.log('User data successfully saved to Firestore with merge!');
+        console.log('This preserves any existing fields from Apple Sign In and adds onboarding data');
         
         // Create default filter based on user preferences
         setStatusMessage('Creating your personalized filter...');
@@ -248,19 +275,21 @@ const SettingEverythingUpScreen = ({ navigation, route }) => {
         
         // Verify data was saved
         setStatusMessage('Verifying your data was saved correctly...');
-        console.log('Data save successful! User document created with ID:', currentUser.uid);
+        console.log('Data save successful! User document created/updated with ID:', currentUser.uid);
         
         // Mark setup as complete
         isSetupComplete.current = true;
         
         // Show success message
-        setStatusMessage('Setup complete! Navigating to home...');
-        console.log('🚀 NAVIGATING TO HOME SCREEN - FILTER SHOULD BE ACTIVE');
+        setStatusMessage('Success! Loading your home feed...');
+        console.log('✅ ONBOARDING COMPLETE - HasCompletedOnboarding set to true');
+        console.log('🏠 Triggering context to show main app with tabs...');
         
-        // Navigate to home screen after filter is created
+        // Trigger the onboarding context to notify App.js
         setTimeout(() => {
-          navigation.replace('Home');
-        }, 1000); // Small delay to show completion message
+          completeOnboarding();
+          console.log('✅ OnboardingContext triggered - App.js will now show AppNavigator with tabs');
+        }, 1500);
         
       } catch (firestoreError) {
         console.error('Firestore save error:', firestoreError);
@@ -271,8 +300,8 @@ const SettingEverythingUpScreen = ({ navigation, route }) => {
         
         try {
           const userDocRef = doc(db, 'Users', currentUser.uid);
-          await setDoc(userDocRef, userData);
-          console.log('Second attempt: User data successfully saved to Firestore!');
+          await setDoc(userDocRef, userData, { merge: true });
+          console.log('Second attempt: User data successfully saved to Firestore with merge!');
           
           // Create default filter based on user preferences (retry)
           setStatusMessage('Creating your personalized filter...');
@@ -285,17 +314,16 @@ const SettingEverythingUpScreen = ({ navigation, route }) => {
             // Don't fail the entire setup if filter creation fails
           }
           
-          // Mark setup as complete
-          isSetupComplete.current = true;
-          
           // Show success message
-          setStatusMessage('Setup complete after retry! Navigating to home...');
-          console.log('🚀 NAVIGATING TO HOME SCREEN AFTER RETRY - FILTER SHOULD BE ACTIVE');
+          setStatusMessage('Success! Loading your home feed...');
+          console.log('✅ ONBOARDING COMPLETE ON RETRY - HasCompletedOnboarding set to true');
+          console.log('🏠 Triggering context to show main app with tabs...');
           
-          // Navigate to home screen after filter is created
+          // Trigger onboarding context
           setTimeout(() => {
-            navigation.replace('Home');
-          }, 1000); // Small delay to show completion message
+            completeOnboarding();
+            console.log('✅ OnboardingContext triggered - App.js will now show AppNavigator with tabs');
+          }, 1500);
           
         } catch (retryError) {
           console.error('Even retry failed:', retryError);

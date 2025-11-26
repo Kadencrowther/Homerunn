@@ -145,7 +145,7 @@ const WelcomeScreen = ({ navigation }) => {
       
       <View style={styles.contentContainer}>
         <Text style={styles.title}>Welcome to Homerunn</Text>
-        
+
         <TouchableOpacity
           style={styles.appleButton}
           onPress={handleAppleSignIn}
@@ -167,7 +167,7 @@ const WelcomeScreen = ({ navigation }) => {
           Homerunn requires an account to curate homes and preferences to your needs. By continuing, you are accepting all of Homerunn's{' '}
           <Text style={styles.termsLinkTextInline} onPress={() => setIsTermsModalVisible(true)}>
             Terms and Conditions
-          </Text>
+        </Text>
         </Text>
       </View>
 

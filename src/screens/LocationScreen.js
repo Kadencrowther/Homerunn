@@ -59,24 +59,24 @@ const LocationScreen = ({ navigation, route }) => {
   const buttonsOpacity = useSharedValue(0);
 
   const headerAnimatedStyle = useAnimatedStyle(() => ({
-    opacity: headerOpacity.value,
-    transform: [{ translateY: (1 - headerOpacity.value) * -30 }]
+      opacity: headerOpacity.value,
+      transform: [{ translateY: (1 - headerOpacity.value) * -30 }]
   }));
 
   const contentAnimatedStyle = useAnimatedStyle(() => ({
     opacity: contentOpacity.value,
   }));
-
+  
   const sliderAnimatedStyle = useAnimatedStyle(() => ({
-    opacity: sliderOpacity.value,
+      opacity: sliderOpacity.value,
     height: selectedCity ? 'auto' : 0,
     marginTop: selectedCity ? 20 : 0,
-    overflow: 'hidden'
+      overflow: 'hidden'
   }));
 
   const buttonAnimatedStyle = useAnimatedStyle(() => ({
-    opacity: buttonsOpacity.value,
-    transform: [{ translateY: (1 - buttonsOpacity.value) * 20 }]
+      opacity: buttonsOpacity.value,
+      transform: [{ translateY: (1 - buttonsOpacity.value) * 20 }]
   }));
 
   useEffect(() => {
@@ -97,7 +97,7 @@ const LocationScreen = ({ navigation, route }) => {
   useEffect(() => {
     if (selectedCity && selectedState) {
       geocodeCity(selectedCity, allStates[selectedState]?.name);
-    }
+      }
   }, [selectedCity, selectedState]);
 
   const geocodeCity = async (cityName, stateName) => {
@@ -300,10 +300,10 @@ const LocationScreen = ({ navigation, route }) => {
         </View>
         
         {!showCitySelection && (
-          <Animated.View style={[styles.headerContainer, headerAnimatedStyle]}>
-            <Text style={styles.title}>Where are you looking for homes?</Text>
+        <Animated.View style={[styles.headerContainer, headerAnimatedStyle]}>
+          <Text style={styles.title}>Where are you looking for homes?</Text>
             <Text style={styles.subtitle}>First, select your state</Text>
-          </Animated.View>
+        </Animated.View>
         )}
         
         <Animated.View style={[styles.content, contentAnimatedStyle]}>
@@ -323,25 +323,25 @@ const LocationScreen = ({ navigation, route }) => {
             />
           )}
         </Animated.View>
-
+        
         {selectedCity && mapRegion && (
-          <Animated.View style={[styles.radiusContainer, sliderAnimatedStyle]}>
-            <View style={styles.radiusLabelContainer}>
-              <Text style={styles.radiusLabel}>Search Radius</Text>
-              <Text style={styles.radiusValue}>{radiusMiles} miles</Text>
-            </View>
-            <Slider
-              style={styles.radiusSlider}
-              minimumValue={MIN_RADIUS}
-              maximumValue={MAX_RADIUS}
-              value={radiusMiles}
-              onValueChange={handleRadiusChange}
-              step={1}
-              minimumTrackTintColor="#fc565b"
-              maximumTrackTintColor="#d3d3d3"
-              thumbTintColor="#fc565b"
-            />
-            
+        <Animated.View style={[styles.radiusContainer, sliderAnimatedStyle]}>
+          <View style={styles.radiusLabelContainer}>
+            <Text style={styles.radiusLabel}>Search Radius</Text>
+            <Text style={styles.radiusValue}>{radiusMiles} miles</Text>
+          </View>
+          <Slider
+            style={styles.radiusSlider}
+            minimumValue={MIN_RADIUS}
+            maximumValue={MAX_RADIUS}
+            value={radiusMiles}
+            onValueChange={handleRadiusChange}
+            step={1}
+            minimumTrackTintColor="#fc565b"
+            maximumTrackTintColor="#d3d3d3"
+            thumbTintColor="#fc565b"
+          />
+          
             <View style={styles.mapContainer}>
               <MapView
                 style={styles.map}
@@ -366,7 +366,7 @@ const LocationScreen = ({ navigation, route }) => {
                 )}
               </MapView>
             </View>
-          </Animated.View>
+        </Animated.View>
         )}
 
         <Animated.View style={[styles.bottomContainer, buttonAnimatedStyle]}>
@@ -543,4 +543,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default LocationScreen;
+export default LocationScreen; 

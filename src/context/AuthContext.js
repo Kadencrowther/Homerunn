@@ -50,6 +50,9 @@ export const AuthProvider = ({ children }) => {
             `${credential.fullName.givenName || ''} ${credential.fullName.familyName || ''}`.trim() : 
             user.displayName || '',
           IsActive: true,
+          HasCompletedOnboarding: false,
+          NotificationsEnabled: false,
+          NotificationDevices: [],
           createdAt: new Date().toISOString(),
           authProvider: 'apple',
         });

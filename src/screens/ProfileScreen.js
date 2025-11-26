@@ -2,13 +2,14 @@ import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Modal, TextInput, Animated, SafeAreaView, ScrollView, KeyboardAvoidingView, Platform, Linking, Switch, Dimensions, Alert, ActivityIndicator, FlatList } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { auth, db } from '../config/firebase';
-import { signOut, updateEmail, updatePassword, verifyBeforeUpdateEmail, EmailAuthProvider, reauthenticateWithCredential } from 'firebase/auth';
-import { doc, getDoc, updateDoc, addDoc, collection, serverTimestamp } from 'firebase/firestore';
+import { signOut, updateEmail, updatePassword, verifyBeforeUpdateEmail, EmailAuthProvider, reauthenticateWithCredential, deleteUser } from 'firebase/auth';
+import { doc, getDoc, updateDoc, addDoc, collection, serverTimestamp, deleteDoc } from 'firebase/firestore';
 import { LinearGradient } from 'expo-linear-gradient';
 import Slider from '@react-native-community/slider';
 import MapView, { Circle, Marker } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { initializeUserMatchMetric } from '../utils/UserMatchMetric';
+import NotificationModal from '../components/NotificationModal';
 
 const { width } = Dimensions.get('window');
 
@@ -76,6 +77,7 @@ const ProfileScreen = ({ navigation }) => {
   const [isPreferencesModalVisible, setIsPreferencesModalVisible] = useState(false);
   const [isHelpFeedbackModalVisible, setIsHelpFeedbackModalVisible] = useState(false);
   const [isTermsModalVisible, setIsTermsModalVisible] = useState(false);
+  const [isNotificationModalVisible, setIsNotificationModalVisible] = useState(false);
   const [password, setPassword] = useState('');
   const [userName, setUserName] = useState('');
   const [loading, setLoading] = useState(true);
@@ -352,25 +354,44 @@ const ProfileScreen = ({ navigation }) => {
         return;
       }
 
-      // Update user document to set IsActive to false
+      // Delete user document from Firestore
       const userDocRef = doc(db, 'Users', userId);
-      await updateDoc(userDocRef, {
-        IsActive: false,
-        DeactivatedAt: serverTimestamp()
-      });
+      await deleteDoc(userDocRef);
+      console.log('User document deleted from Firestore');
 
-      // Sign out the user
-      await signOut(auth);
+      // Delete Firebase Auth account
+      await deleteUser(auth.currentUser);
+      console.log('Firebase Auth account deleted');
       
       Alert.alert(
-        'Account Deactivated',
-        'Your account has been deactivated successfully. You have been signed out.',
+        'Account Deleted',
+        'Your account has been permanently deleted.',
         [{ text: 'OK' }]
       );
       
+      // User is automatically signed out when account is deleted
+      
     } catch (error) {
       console.error('Error deactivating account:', error);
-      Alert.alert('Error', 'Failed to deactivate account. Please try again.');
+      
+      // If error is due to requiring recent login, inform the user
+      if (error.code === 'auth/requires-recent-login') {
+        Alert.alert(
+          'Recent Login Required', 
+          'For security reasons, please sign out and sign in again before deleting your account.',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { 
+              text: 'Sign Out', 
+              onPress: async () => {
+                await signOut(auth);
+              }
+            }
+          ]
+        );
+      } else {
+        Alert.alert('Error', 'Failed to delete account. Please try again.');
+      }
     }
   };
 
@@ -398,16 +419,8 @@ const ProfileScreen = ({ navigation }) => {
     setEditError('');
   };
 
-  const handleOpenNotificationSettings = async () => {
-    try {
-      if (Platform.OS === 'ios') {
-        await Linking.openURL('app-settings:');
-      } else {
-        await Linking.openSettings();
-      }
-    } catch (error) {
-      console.error('Error opening notification settings:', error);
-    }
+  const handleOpenNotificationSettings = () => {
+    setIsNotificationModalVisible(true);
   };
 
   const handleOpenPreferences = () => {
@@ -1028,9 +1041,9 @@ const ProfileScreen = ({ navigation }) => {
           <Text style={styles.signOutButtonText}>Sign Out</Text>
         </TouchableOpacity>
 
-        {/* Deactivate Account Button */}
+        {/* Delete Account Button */}
         <TouchableOpacity style={styles.deactivateButton} onPress={handleDeactivate}>
-          <Text style={styles.deactivateButtonText}>Deactivate Account</Text>
+          <Text style={styles.deactivateButtonText}>Delete Account</Text>
         </TouchableOpacity>
 
         {/* Sign Out Modal */}
@@ -1249,19 +1262,25 @@ const ProfileScreen = ({ navigation }) => {
           <View style={styles.modalContainer}>
             <View style={styles.modalContent}>
               <Ionicons name="warning-outline" size={40} color="#fc565b" style={styles.modalIcon} />
-              <Text style={styles.modalTitle}>Deactivate Account</Text>
-              <Text style={styles.modalSubtitle}>This action cannot be undone. Your account will be deactivated and you will be signed out.</Text>
+              <Text style={styles.modalTitle}>Delete Account</Text>
+              <Text style={styles.modalSubtitle}>This action cannot be undone. Your account and all associated data will be permanently deleted.</Text>
               <View style={styles.modalButtons}>
                 <TouchableOpacity style={styles.cancelButton} onPress={() => setIsDeactivateModalVisible(false)}>
                   <Text style={styles.cancelButtonText}>Cancel</Text>
                 </TouchableOpacity>
                 <TouchableOpacity style={styles.deactivateConfirmButton} onPress={handleDeactivateAccount}>
-                  <Text style={styles.confirmButtonText}>Deactivate</Text>
+                  <Text style={styles.confirmButtonText}>Delete Account</Text>
                 </TouchableOpacity>
               </View>
             </View>
           </View>
         </Modal>
+
+        {/* Notification Modal */}
+        <NotificationModal
+          visible={isNotificationModalVisible}
+          onClose={() => setIsNotificationModalVisible(false)}
+        />
 
         {/* Help and Feedback Modal */}
         <Modal

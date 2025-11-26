@@ -21,6 +21,7 @@ import Animated, {
   Easing
 } from 'react-native-reanimated';
 import ProgressBar from '../components/ProgressBar';
+import { enableNotifications } from '../services/NotificationService';
 
 const { width, height } = Dimensions.get('window');
 
@@ -115,36 +116,27 @@ const NotificationSetupScreen = ({ navigation, route }) => {
         withTiming(1, { duration: 100 })
       );
       
-      // Check current permissions first
-      const { status: existingStatus } = await Notifications.getPermissionsAsync();
+      console.log('🔔 Requesting notification permissions...');
       
-      let finalStatus = existingStatus;
+      // Use the NotificationService to enable notifications
+      // This will request permissions, get the token, get device info, and save to Firestore
+      const success = await enableNotifications();
       
-      // If permissions haven't been determined yet, request them
-      if (existingStatus !== 'granted') {
-        // This will trigger the native permission dialog
-        const { status } = await Notifications.requestPermissionsAsync({
-          ios: {
-            allowAlert: true,
-            allowBadge: true,
-            allowSound: true,
-          },
-          android: {
-            allowAnnouncements: true,
-          }
-        });
-        
-        finalStatus = status;
+      if (success) {
+        console.log('✅ Notifications enabled successfully! Token and device info saved to Firestore.');
+        Alert.alert('Success!', 'Notifications enabled. You\'ll receive updates about new listings and price changes.');
+      } else {
+        console.log('⚠️ Notification permissions denied or failed');
+        Alert.alert('Notifications Not Enabled', 'You can enable notifications later in your profile settings.');
       }
       
-      console.log('Notification permission status:', finalStatus);
+      // Navigate to congratulations screen regardless of permission outcome
       console.log('NotificationSetupScreen passing params:', route.params);
-      
-      // Whether permissions are granted or denied, proceed to the next screen
       navigation.navigate('Congratulations', route.params);
       
     } catch (error) {
       console.error('Notification error:', error);
+      Alert.alert('Error', 'Something went wrong with notifications. You can enable them later in settings.');
       
       // Navigate to congratulations screen despite error
       navigation.navigate('Congratulations', route.params);
