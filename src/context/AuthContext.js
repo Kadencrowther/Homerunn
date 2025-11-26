@@ -1,11 +1,12 @@
 import React, { createContext, useState, useContext, useEffect } from 'react';
-import { auth } from '../config/firebase';
+import { auth, db } from '../config/firebase';
 import { 
   onAuthStateChanged, 
-  signInWithCredential, 
-  GoogleAuthProvider,
+  signInWithCredential,
+  OAuthProvider,
   signOut
 } from 'firebase/auth';
+import { doc, setDoc, getDoc } from 'firebase/firestore';
 
 const AuthContext = createContext({});
 
@@ -26,13 +27,40 @@ export const AuthProvider = ({ children }) => {
     return unsubscribe;
   }, []);
 
-  const signInWithGoogle = async (idToken) => {
+  const signInWithApple = async (credential) => {
     try {
-      const credential = GoogleAuthProvider.credential(idToken);
-      const userCredential = await signInWithCredential(auth, credential);
-      return userCredential.user;
+      const provider = new OAuthProvider('apple.com');
+      const oauthCredential = provider.credential({
+        idToken: credential.identityToken,
+        rawNonce: credential.nonce,
+      });
+      
+      const userCredential = await signInWithCredential(auth, oauthCredential);
+      const user = userCredential.user;
+      
+      // Create or update user document in Firestore
+      const userDocRef = doc(db, 'Users', user.uid);
+      const userDoc = await getDoc(userDocRef);
+      
+      if (!userDoc.exists()) {
+        // Create new user document
+        await setDoc(userDocRef, {
+          email: user.email || credential.email || '',
+          displayName: credential.fullName ? 
+            `${credential.fullName.givenName || ''} ${credential.fullName.familyName || ''}`.trim() : 
+            user.displayName || '',
+          IsActive: true,
+          createdAt: new Date().toISOString(),
+          authProvider: 'apple',
+        });
+      } else {
+        // Update existing user to set IsActive
+        await setDoc(userDocRef, { IsActive: true }, { merge: true });
+      }
+      
+      return user;
     } catch (error) {
-      console.error('Error signing in with Google:', error);
+      console.error('Error signing in with Apple:', error);
       throw error;
     }
   };
@@ -45,7 +73,7 @@ export const AuthProvider = ({ children }) => {
     <AuthContext.Provider value={{
       user,
       loading,
-      signInWithGoogle,
+      signInWithApple,
       logout
     }}>
       {!loading && children}

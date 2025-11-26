@@ -58,7 +58,16 @@ const SettingEverythingUpScreen = ({ navigation, route }) => {
   const Location = {
     Name: location,
     RadiusMiles: params.radiusMiles || 10, // Default to 10 miles if not specified
-    Coordinates: params.coordinates || null
+    Coordinates: params.coordinates ? {
+      Latitude: params.coordinates.latitude,
+      Longitude: params.coordinates.longitude
+    } : null,
+    MapRegion: params.mapRegion ? {
+      Latitude: params.mapRegion.latitude,
+      Longitude: params.mapRegion.longitude,
+      LatitudeDelta: params.mapRegion.latitudeDelta,
+      LongitudeDelta: params.mapRegion.longitudeDelta
+    } : null
   };
   
   const MarketingSource = marketingSource;

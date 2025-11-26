@@ -102,11 +102,11 @@ export const createDefaultFilterFromPreferences = async (userId, userData) => {
       CreatedAt: new Date(),
       IsActive: true,
       AddressText: location.Name || '',
-      MapRegion: location.Coordinates ? {
-        Latitude: location.Coordinates.latitude,
-        Longitude: location.Coordinates.longitude,
-        LatitudeDelta: calculateZoomForRadius(location.RadiusMiles || 10),
-        LongitudeDelta: calculateZoomForRadius(location.RadiusMiles || 10) * (375 / 812) // Approximate aspect ratio
+      MapRegion: (location.MapRegion || location.Coordinates) ? {
+        Latitude: location.MapRegion?.Latitude || location.Coordinates?.Latitude,
+        Longitude: location.MapRegion?.Longitude || location.Coordinates?.Longitude,
+        LatitudeDelta: location.MapRegion?.LatitudeDelta || calculateZoomForRadius(location.RadiusMiles || 10),
+        LongitudeDelta: location.MapRegion?.LongitudeDelta || (calculateZoomForRadius(location.RadiusMiles || 10) * (375 / 812)) // Approximate aspect ratio
       } : null,
       RadiusMiles: location.RadiusMiles || 10
     };

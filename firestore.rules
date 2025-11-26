@@ -217,5 +217,31 @@ service cloud.firestore {
       allow update: if request.auth != null && 
                     resource.data.UserId == request.auth.uid;
     }
+
+    // Add rules for IntegrationRequests collection
+    match /IntegrationRequests/{requestId} {
+      // Allow anyone to create integration requests (even during onboarding)
+      allow create: if 
+        // Require all necessary fields
+        request.resource.data.keys().hasAll(['City', 'State', 'StateAbbr', 'Status', 'CreatedAt', 'RequestedAt']) &&
+        // Validate that Status is 'Pending'
+        request.resource.data.Status == 'Pending' &&
+        // Validate that City is a string
+        request.resource.data.City is string &&
+        // Validate that State is a string
+        request.resource.data.State is string &&
+        // Validate that StateAbbr is a string
+        request.resource.data.StateAbbr is string;
+      
+      // Allow authenticated users to read their own requests
+      allow read: if request.auth != null && 
+                  (resource.data.UserId == request.auth.uid || 
+                   resource.data.UserEmail == request.auth.token.email);
+      
+      // Allow authenticated users to update their own requests
+      allow update: if request.auth != null && 
+                    (resource.data.UserId == request.auth.uid || 
+                     resource.data.UserEmail == request.auth.token.email);
+    }
   }
 }

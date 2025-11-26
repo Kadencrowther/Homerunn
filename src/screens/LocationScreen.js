@@ -6,12 +6,10 @@ import {
   TouchableOpacity, 
   Dimensions,
   StatusBar,
-  TextInput,
   Keyboard,
   TouchableWithoutFeedback,
-  ActivityIndicator,
-  FlatList,
-  Vibration
+  Vibration,
+  Alert
 } from 'react-native';
 import Slider from '@react-native-community/slider';
 import { Ionicons } from '@expo/vector-icons';
@@ -21,100 +19,33 @@ import Animated, {
   withTiming, 
   withDelay
 } from 'react-native-reanimated';
+import MapView, { Circle, Marker } from 'react-native-maps';
 import * as Location from 'expo-location';
 import ProgressBar from '../components/ProgressBar';
+import USAMap from '../components/USAMap';
+import CitySelector from '../components/CitySelector';
+import IntegrationRequestModal from '../components/IntegrationRequestModal';
+import { availableStates, getCitiesForState, allStates } from '../data/statesData';
+import { submitIntegrationRequest, isStateIntegrated } from '../services/IntegrationRequestService';
 
 const { width, height } = Dimensions.get('window');
 
-// Define the current step for this screen
 const CURRENT_STEP = 5;
 const TOTAL_STEPS = 10;
 
-// Default radius in miles
 const DEFAULT_RADIUS = 5;
 const MIN_RADIUS = 1;
 const MAX_RADIUS = 50;
 
-// Sample list of popular US cities for quick selection
-const popularCities = [
-  { id: '1', name: 'New York, NY' },
-  { id: '2', name: 'Los Angeles, CA' },
-  { id: '3', name: 'Chicago, IL' },
-  { id: '4', name: 'Houston, TX' },
-  { id: '5', name: 'Phoenix, AZ' },
-  { id: '6', name: 'Philadelphia, PA' },
-  { id: '7', name: 'San Antonio, TX' },
-  { id: '8', name: 'San Diego, CA' },
-  { id: '9', name: 'Dallas, TX' },
-  { id: '10', name: 'San Francisco, CA' },
-  { id: '11', name: 'Austin, TX' },
-  { id: '12', name: 'Seattle, WA' },
-  { id: '13', name: 'Denver, CO' },
-  { id: '14', name: 'Boston, MA' },
-  { id: '15', name: 'Miami, FL' }
-];
-
-// Map graphic component to visually represent the radius
-const MapGraphic = ({ radius }) => {
-  // Calculate the size of the circle based on the radius value and available space
-  // Using a percentage between min and max radius to determine size
-  const percentage = (radius - MIN_RADIUS) / (MAX_RADIUS - MIN_RADIUS);
-  
-  // Calculate available space and adjust size accordingly
-  const availableHeight = height * 0.4; // Reserve space for buttons and other elements
-  const maxCircleSize = Math.min(width * 0.4, availableHeight * 0.3);
-  const minCircleSize = Math.min(width * 0.05, availableHeight * 0.1);
-  
-  const circleSize = minCircleSize + percentage * (maxCircleSize - minCircleSize);
-  
-  return (
-    <View style={styles.mapGraphicContainer}>
-      {/* Map-like background */}
-      <View style={styles.mapBackground}>
-        {/* Roads */}
-        <View style={[styles.road, { top: '30%', left: 0, width: '100%' }]} />
-        <View style={[styles.road, { top: 0, left: '40%', height: '100%', width: 5 }]} />
-        <View style={[styles.road, { top: '60%', left: 0, width: '100%' }]} />
-        <View style={[styles.road, { top: 0, left: '70%', height: '100%', width: 5 }]} />
-        
-        {/* City blocks */}
-        <View style={[styles.cityBlock, { top: '10%', left: '10%' }]} />
-        <View style={[styles.cityBlock, { top: '10%', left: '50%' }]} />
-        <View style={[styles.cityBlock, { top: '40%', left: '20%' }]} />
-        <View style={[styles.cityBlock, { top: '40%', left: '60%' }]} />
-        <View style={[styles.cityBlock, { top: '70%', left: '30%' }]} />
-        <View style={[styles.cityBlock, { top: '70%', left: '80%' }]} />
-        
-        {/* Central location marker */}
-        <View style={styles.centerMarkerContainer}>
-          <View style={styles.centerMarker} />
-          <View style={styles.centerPin} />
-        </View>
-        
-        {/* Circle representing the radius */}
-        <Animated.View 
-          style={[
-            styles.radiusCircle, 
-            { 
-              width: circleSize, 
-              height: circleSize,
-              borderRadius: circleSize / 2,
-              transform: [{ translateX: -circleSize / 2 }, { translateY: -circleSize / 2 }]
-            }
-          ]}
-        />
-      </View>
-    </View>
-  );
-};
-
 const LocationScreen = ({ navigation, route }) => {
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedLocation, setSelectedLocation] = useState(null);
+  const [selectedState, setSelectedState] = useState(null);
+  const [selectedCity, setSelectedCity] = useState(null);
+  const [cityCoordinates, setCityCoordinates] = useState(null);
   const [radiusMiles, setRadiusMiles] = useState(DEFAULT_RADIUS);
-  const [searchResults, setSearchResults] = useState([]);
-  const [isSearching, setIsSearching] = useState(false);
-  const [filteredCities, setFilteredCities] = useState(popularCities);
+  const [showCitySelection, setShowCitySelection] = useState(false);
+  const [mapRegion, setMapRegion] = useState(null);
+  const [showIntegrationModal, setShowIntegrationModal] = useState(false);
+  const [isSubmittingRequest, setIsSubmittingRequest] = useState(false);
   
   const credentials = route.params?.credentials || {};
   const preferences = route.params?.preferences || [];
@@ -122,226 +53,226 @@ const LocationScreen = ({ navigation, route }) => {
   const hasAgent = route.params?.hasAgent || null;
   const agentName = route.params?.agentName || null;
   
-  // Add logging to debug received parameters
-  console.log('LocationScreen received params:', {
-    hasCredentials: !!credentials,
-    credentialsType: typeof credentials,
-    email: credentials?.email,
-    hasPassword: !!credentials?.password,
-    preferencesCount: preferences.length,
-    timeframe: timeframe,
-    hasAgent: hasAgent,
-    agentName: agentName
-  });
-  
-  // Animation values
   const headerOpacity = useSharedValue(0);
-  const searchOpacity = useSharedValue(0);
-  const citiesOpacity = useSharedValue(0);
+  const contentOpacity = useSharedValue(0);
   const sliderOpacity = useSharedValue(0);
   const buttonsOpacity = useSharedValue(0);
 
-  // Animated styles
-  const headerAnimatedStyle = useAnimatedStyle(() => {
-    return {
-      opacity: headerOpacity.value,
-      transform: [{ translateY: (1 - headerOpacity.value) * -30 }]
-    };
-  });
+  const headerAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: headerOpacity.value,
+    transform: [{ translateY: (1 - headerOpacity.value) * -30 }]
+  }));
 
-  const searchAnimatedStyle = useAnimatedStyle(() => {
-    return {
-      opacity: searchOpacity.value,
-      transform: [{ translateY: (1 - searchOpacity.value) * -20 }]
-    };
-  });
+  const contentAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: contentOpacity.value,
+  }));
 
-  const citiesAnimatedStyle = useAnimatedStyle(() => {
-    return {
-      opacity: citiesOpacity.value,
-      display: selectedLocation ? 'none' : 'flex'
-    };
-  });
-  
-  const sliderAnimatedStyle = useAnimatedStyle(() => {
-    return {
-      opacity: sliderOpacity.value,
-      height: selectedLocation ? 'auto' : 0,
-      marginTop: selectedLocation ? height * 0.05 : 0,
-      marginBottom: selectedLocation ? height * 0.4 : 0,
-      overflow: 'hidden'
-    };
-  });
+  const sliderAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: sliderOpacity.value,
+    height: selectedCity ? 'auto' : 0,
+    marginTop: selectedCity ? 20 : 0,
+    overflow: 'hidden'
+  }));
 
-  const buttonAnimatedStyle = useAnimatedStyle(() => {
-    return {
-      opacity: buttonsOpacity.value,
-      transform: [{ translateY: (1 - buttonsOpacity.value) * 20 }]
-    };
-  });
+  const buttonAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: buttonsOpacity.value,
+    transform: [{ translateY: (1 - buttonsOpacity.value) * 20 }]
+  }));
 
-  // Animate elements on mount
   useEffect(() => {
     headerOpacity.value = withTiming(1, { duration: 800 });
-    searchOpacity.value = withDelay(300, withTiming(1, { duration: 800 }));
-    citiesOpacity.value = withDelay(500, withTiming(1, { duration: 800 }));
-    buttonsOpacity.value = withDelay(700, withTiming(1, { duration: 800 }));
+    contentOpacity.value = withDelay(300, withTiming(1, { duration: 800 }));
+    buttonsOpacity.value = withDelay(500, withTiming(1, { duration: 800 }));
   }, []);
 
-  // Update slider animation when location is selected
   useEffect(() => {
-    if (selectedLocation) {
+    if (selectedCity) {
       sliderOpacity.value = withTiming(1, { duration: 500 });
     } else {
       sliderOpacity.value = withTiming(0, { duration: 300 });
     }
-  }, [selectedLocation]);
+  }, [selectedCity]);
 
-  // Filter popular cities based on search query
+  // Geocode the city to get coordinates when city is selected
   useEffect(() => {
-    if (searchQuery) {
-      const filtered = popularCities.filter(city => 
-        city.name.toLowerCase().includes(searchQuery.toLowerCase())
-      );
-      setFilteredCities(filtered);
-      
-      // If query is specific enough, attempt to search for additional locations
-      if (searchQuery.length > 2) {
-        searchLocations(searchQuery);
-      } else {
-        setSearchResults([]);
-      }
-    } else {
-      setFilteredCities(popularCities);
-      setSearchResults([]);
+    if (selectedCity && selectedState) {
+      geocodeCity(selectedCity, allStates[selectedState]?.name);
     }
-  }, [searchQuery]);
+  }, [selectedCity, selectedState]);
 
-  const searchLocations = async (query) => {
-    setIsSearching(true);
+  const geocodeCity = async (cityName, stateName) => {
     try {
-      const locations = await Location.geocodeAsync(query);
+      const searchQuery = `${cityName}, ${stateName}`;
+      const locations = await Location.geocodeAsync(searchQuery);
       
       if (locations.length > 0) {
-        // Get location names for each result
-        const resultsWithNames = await Promise.all(
-          locations.slice(0, 3).map(async (loc) => {
-            const address = await Location.reverseGeocodeAsync({
-              latitude: loc.latitude,
-              longitude: loc.longitude,
-            });
-            
-            let name = query;
-            if (address.length > 0) {
-              name = address[0].city 
-                ? `${address[0].city}, ${address[0].region}`
-                : address[0].region || query;
-            }
-            
-            return {
-              ...loc,
-              name,
-              id: `${loc.latitude}-${loc.longitude}`
-            };
-          })
-        );
+        const { latitude, longitude } = locations[0];
+        setCityCoordinates({ latitude, longitude });
         
-        setSearchResults(resultsWithNames);
-      } else {
-        setSearchResults([]);
+        // Calculate zoom level for the radius
+        const delta = calculateZoomForRadius(radiusMiles);
+        
+        setMapRegion({
+          latitude,
+          longitude,
+          latitudeDelta: delta,
+          longitudeDelta: delta * (width / height),
+        });
       }
     } catch (error) {
-      console.error('Error searching locations:', error);
-      // Don't show the error to the user - just continue
-    } finally {
-      setIsSearching(false);
+      console.error('Error geocoding city:', error);
     }
   };
 
-  const handleLocationSelect = (location) => {
-    setSelectedLocation({
-      name: location.name,
-      coordinates: location.latitude && location.longitude ? 
-        { latitude: location.latitude, longitude: location.longitude } : null
-    });
+  // Calculate the appropriate zoom level (delta) based on radius in miles
+  const calculateZoomForRadius = (radiusMiles) => {
+    const milesPerDelta = 60;
+    const delta = (radiusMiles * 2.6) / milesPerDelta;
+    return Math.max(0.01, Math.min(delta, 30));
+  };
+
+  const handleStatePress = (stateAbbr) => {
+    setSelectedState(stateAbbr);
+    setSelectedCity(null);
     
-    setSearchQuery('');
-    setSearchResults([]);
+    // Check if state is available (only Mississippi for now)
+    const state = allStates[stateAbbr];
+    if (state && state.available) {
+      setShowCitySelection(true);
+    } else {
+      // For now, just show city selection - we'll add validation modal later
+      setShowCitySelection(true);
+    }
+  };
+
+  const handleCitySelectFromSearch = (cityName, stateAbbr) => {
+    setSelectedState(stateAbbr);
+    setSelectedCity(cityName);
+    setShowCitySelection(true);
   };
 
   const handleCityPress = (city) => {
-    setSelectedLocation({
-      name: city.name,
-      coordinates: null // We don't have coordinates for the sample cities
-    });
+    if (city.name === null) {
+      // User clicked "Change" - deselect the city
+      setSelectedCity(null);
+      setCityCoordinates(null);
+      setMapRegion(null);
+    } else {
+      setSelectedCity(city.name);
+    }
+  };
+
+  const handleBackToStates = () => {
+    setShowCitySelection(false);
+    setSelectedCity(null);
   };
 
   const handleRadiusChange = (value) => {
     const newValue = Math.round(value);
-    // Vibrate when the rounded value changes
     if (newValue !== radiusMiles) {
-      Vibration.vibrate(10); // Short, subtle vibration
+      Vibration.vibrate(10);
     }
     setRadiusMiles(newValue);
+    
+    // Update map zoom when radius changes
+    if (mapRegion) {
+      const delta = calculateZoomForRadius(newValue);
+      setMapRegion(prev => ({
+        ...prev,
+        latitudeDelta: delta,
+        longitudeDelta: delta * (width / height),
+      }));
+    }
   };
 
   const handleContinue = () => {
-    const params = {
-      credentials: credentials,
-      preferences: preferences,
-      timeframe: timeframe,
-      hasAgent: hasAgent,
-      agentName: agentName,
-      location: selectedLocation.name,
-      coordinates: selectedLocation.coordinates,
-      radiusMiles: radiusMiles
-    };
+    // Check if the state is integrated
+    if (!isStateIntegrated(selectedState)) {
+      // Show integration request modal
+      setShowIntegrationModal(true);
+      return;
+    }
     
-    console.log('LocationScreen navigating to ReviewScreen with params:', {
-      hasCredentials: !!params.credentials,
-      credentialsType: typeof params.credentials,
-      email: params.credentials?.email,
-      hasPassword: !!params.credentials?.password,
-      location: params.location
-    });
+    // State is integrated, proceed normally
+    const stateName = availableStates[selectedState]?.name || allStates[selectedState]?.name;
+    const locationString = `${selectedCity}, ${stateName}`;
+    
+    const params = {
+      credentials,
+      preferences,
+      timeframe,
+      hasAgent,
+      agentName,
+      location: locationString,
+      state: selectedState,
+      city: selectedCity,
+      radiusMiles,
+      coordinates: cityCoordinates, // Pass the city coordinates
+      mapRegion: mapRegion // Pass the full map region for the filter
+    };
     
     navigation.navigate('ReviewScreen', params);
   };
 
-  const handleCancel = () => {
-    const params = {
-      credentials: credentials,
-      preferences: preferences,
-      timeframe: timeframe,
-      hasAgent: hasAgent,
-      agentName: agentName,
-      location: null,
-      coordinates: null
-    };
-    
-    console.log('LocationScreen cancelling, navigating to ProfileCompletion with params:', {
-      hasCredentials: !!params.credentials,
-      email: params.credentials?.email
-    });
-    
-    navigation.navigate('ProfileCompletion', params);
+  const handleIntegrationRequest = async () => {
+    try {
+      setIsSubmittingRequest(true);
+      
+      const stateName = allStates[selectedState]?.name;
+      const userInfo = {
+        credentials,
+        preferences,
+        timeframe,
+        hasAgent,
+        agentName
+      };
+      
+      await submitIntegrationRequest(
+        selectedCity,
+        stateName,
+        selectedState,
+        userInfo
+      );
+      
+      setIsSubmittingRequest(false);
+      setShowIntegrationModal(false);
+      
+      // Show success message
+      Alert.alert(
+        'Request Submitted!',
+        `We've received your request for ${selectedCity}, ${stateName}. We'll notify you when it becomes available!`,
+        [
+          {
+            text: 'OK',
+            onPress: () => {
+              // Go back to state selection
+              handleBackToStates();
+            }
+          }
+        ]
+      );
+    } catch (error) {
+      setIsSubmittingRequest(false);
+      console.error('Error submitting integration request:', error);
+      Alert.alert(
+        'Error',
+        'Failed to submit integration request. Please try again.',
+        [{ text: 'OK' }]
+      );
+    }
   };
 
-  const skipButton = () => {
+  const handleSkip = () => {
     const params = {
-      credentials: credentials,
-      preferences: preferences,
-      timeframe: timeframe,
-      hasAgent: hasAgent,
-      agentName: agentName,
+      credentials,
+      preferences,
+      timeframe,
+      hasAgent,
+      agentName,
       location: null,
-      coordinates: null
+      state: null,
+      city: null
     };
-    
-    console.log('LocationScreen skipping, navigating to ReviewScreen with params:', {
-      hasCredentials: !!params.credentials,
-      email: params.credentials?.email
-    });
     
     navigation.navigate('ReviewScreen', params);
   };
@@ -350,39 +281,15 @@ const LocationScreen = ({ navigation, route }) => {
     Keyboard.dismiss();
   };
 
-  const renderCityItem = ({ item }) => {
-    const isSelected = selectedLocation && selectedLocation.name === item.name;
-    return (
-      <TouchableOpacity
-        style={[styles.cityItem, isSelected && styles.selectedCityItem]}
-        onPress={() => handleCityPress(item)}
-      >
-        <Ionicons 
-          name="location" 
-          size={18} 
-          color={isSelected ? "#fff" : "#666"} 
-          style={styles.cityItemIcon}
-        />
-        <Text style={[styles.cityItemText, isSelected && styles.selectedCityItemText]}>
-          {item.name}
-        </Text>
-        {isSelected && (
-          <Ionicons name="checkmark-circle" size={18} color="#fff" style={styles.checkmark} />
-        )}
-      </TouchableOpacity>
-    );
-  };
-
   return (
     <TouchableWithoutFeedback onPress={dismissKeyboard}>
       <View style={styles.container}>
         <StatusBar barStyle="dark-content" />
         
-        {/* Header row with back button and progress bar */}
         <View style={styles.headerRow}>
           <TouchableOpacity 
             style={styles.backButton}
-            onPress={() => navigation.goBack()}
+            onPress={() => showCitySelection ? handleBackToStates() : navigation.goBack()}
           >
             <Ionicons name="arrow-back" size={24} color="#000" />
           </TouchableOpacity>
@@ -392,125 +299,105 @@ const LocationScreen = ({ navigation, route }) => {
           </View>
         </View>
         
-        <Animated.View style={[styles.headerContainer, headerAnimatedStyle]}>
-          <Text style={styles.title}>Where are you looking for homes?</Text>
-          <Text style={styles.subtitle}>Select a location and set your search radius</Text>
-        </Animated.View>
-        
-        <Animated.View style={[styles.searchContainer, searchAnimatedStyle]}>
-          <View style={styles.searchInputContainer}>
-            <Ionicons name="search" size={20} color="#666" style={styles.searchIcon} />
-            <TextInput
-              style={styles.searchInput}
-              placeholder="Search cities or ZIP codes"
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-              placeholderTextColor="#999"
-            />
-            {searchQuery.length > 0 && (
-              <TouchableOpacity 
-                style={styles.clearButton}
-                onPress={() => setSearchQuery('')}
-              >
-                <Ionicons name="close-circle" size={18} color="#999" />
-              </TouchableOpacity>
-            )}
-          </View>
-          
-          {searchResults.length > 0 && (
-            <View style={styles.searchResultsContainer}>
-              {searchResults.map((location) => (
-                <TouchableOpacity
-                  key={location.id}
-                  style={styles.searchResultItem}
-                  onPress={() => handleLocationSelect(location)}
-                >
-                  <Ionicons name="location-outline" size={18} color="#666" />
-                  <Text style={styles.searchResultText}>{location.name}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          )}
-          
-          {isSearching && (
-            <View style={styles.searchingIndicator}>
-              <ActivityIndicator color="#fc565b" size="small" />
-              <Text style={styles.searchingText}>Searching...</Text>
-            </View>
-          )}
-        </Animated.View>
-        
-        {/* Selected Location Display */}
-        {selectedLocation && (
-          <View style={styles.selectedLocationContainer}>
-            <View style={styles.selectedLocationBadge}>
-              <Ionicons name="location" size={24} color="#fc565b" />
-              <Text style={styles.selectedLocationText}>{selectedLocation.name}</Text>
-            </View>
-            
-            <TouchableOpacity 
-              style={styles.changeLocationButton}
-              onPress={() => setSelectedLocation(null)}
-            >
-              <Text style={styles.changeLocationText}>Change</Text>
-            </TouchableOpacity>
-          </View>
+        {!showCitySelection && (
+          <Animated.View style={[styles.headerContainer, headerAnimatedStyle]}>
+            <Text style={styles.title}>Where are you looking for homes?</Text>
+            <Text style={styles.subtitle}>First, select your state</Text>
+          </Animated.View>
         )}
         
-        {/* Popular Cities List */}
-        <Animated.View style={[styles.citiesContainer, citiesAnimatedStyle]}>
-          <Text style={styles.citiesTitle}>Popular Cities</Text>
-          <FlatList
-            data={filteredCities}
-            renderItem={renderCityItem}
-            keyExtractor={item => item.id}
-            numColumns={2}
-            style={styles.citiesList}
-            contentContainerStyle={styles.citiesListContent}
-          />
+        <Animated.View style={[styles.content, contentAnimatedStyle]}>
+          {!showCitySelection ? (
+            <USAMap
+              selectedState={selectedState}
+              onStatePress={handleStatePress}
+              onCitySelect={handleCitySelectFromSearch}
+            />
+          ) : (
+            <CitySelector
+              stateAbbr={selectedState}
+              stateName={allStates[selectedState]?.name || availableStates[selectedState]?.name}
+              selectedCity={selectedCity}
+              onCityPress={handleCityPress}
+              onBack={handleBackToStates}
+            />
+          )}
         </Animated.View>
-        
-        {/* Radius Slider */}
-        <Animated.View style={[styles.radiusContainer, sliderAnimatedStyle]}>
-          <View style={styles.radiusLabelContainer}>
-            <Text style={styles.radiusLabel}>Search Radius</Text>
-            <Text style={styles.radiusValue}>{radiusMiles} miles</Text>
-          </View>
-          <Slider
-            style={styles.radiusSlider}
-            minimumValue={MIN_RADIUS}
-            maximumValue={MAX_RADIUS}
-            value={radiusMiles}
-            onValueChange={handleRadiusChange}
-            step={1}
-            minimumTrackTintColor="#fc565b"
-            maximumTrackTintColor="#d3d3d3"
-            thumbTintColor="#fc565b"
-          />
-          
-          {/* Map Graphic visualization */}
-          <MapGraphic radius={radiusMiles} />
-        </Animated.View>
+
+        {selectedCity && mapRegion && (
+          <Animated.View style={[styles.radiusContainer, sliderAnimatedStyle]}>
+            <View style={styles.radiusLabelContainer}>
+              <Text style={styles.radiusLabel}>Search Radius</Text>
+              <Text style={styles.radiusValue}>{radiusMiles} miles</Text>
+            </View>
+            <Slider
+              style={styles.radiusSlider}
+              minimumValue={MIN_RADIUS}
+              maximumValue={MAX_RADIUS}
+              value={radiusMiles}
+              onValueChange={handleRadiusChange}
+              step={1}
+              minimumTrackTintColor="#fc565b"
+              maximumTrackTintColor="#d3d3d3"
+              thumbTintColor="#fc565b"
+            />
+            
+            <View style={styles.mapContainer}>
+              <MapView
+                style={styles.map}
+                region={mapRegion}
+                onRegionChangeComplete={(region) => setMapRegion(region)}
+              >
+                {cityCoordinates && (
+                  <>
+                    <Marker coordinate={cityCoordinates}>
+                      <View style={styles.customMarker}>
+                        <View style={styles.markerInner} />
+                      </View>
+                    </Marker>
+                    <Circle
+                      center={cityCoordinates}
+                      radius={radiusMiles * 1609.34}
+                      strokeWidth={2}
+                      strokeColor="rgba(252, 86, 91, 0.5)"
+                      fillColor="rgba(252, 86, 91, 0.15)"
+                    />
+                  </>
+                )}
+              </MapView>
+            </View>
+          </Animated.View>
+        )}
 
         <Animated.View style={[styles.bottomContainer, buttonAnimatedStyle]}>
           <TouchableOpacity
             style={[
               styles.continueButton,
-              !selectedLocation && styles.disabledButton
+              !selectedCity && styles.disabledButton
             ]}
             onPress={handleContinue}
-            disabled={!selectedLocation}
+            disabled={!selectedCity}
           >
             <Text style={styles.continueButtonText}>Continue</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
             style={styles.skipButton}
-            onPress={skipButton}
+            onPress={handleSkip}
           >
             <Text style={styles.skipButtonText}>Skip this step</Text>
           </TouchableOpacity>
         </Animated.View>
+
+        {/* Integration Request Modal */}
+        <IntegrationRequestModal
+          visible={showIntegrationModal}
+          onClose={() => setShowIntegrationModal(false)}
+          onRequest={handleIntegrationRequest}
+          city={selectedCity}
+          state={allStates[selectedState]?.name}
+          isLoading={isSubmittingRequest}
+        />
       </View>
     </TouchableWithoutFeedback>
   );
@@ -521,7 +408,6 @@ const styles = StyleSheet.create({
     flex: 1,
     padding: width * 0.05,
     backgroundColor: '#fff',
-    paddingBottom: height * 0.2,
   },
   headerRow: {
     flexDirection: 'row',
@@ -538,177 +424,37 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderRadius: 20,
     shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
+    shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.25,
     shadowRadius: 3.84,
     elevation: 5,
     zIndex: 10,
   },
   headerContainer: {
-    marginTop: height * 0.03,
-    marginBottom: height * 0.04,
+    marginTop: height * 0.02,
+    marginBottom: height * 0.03,
     alignItems: 'center',
   },
   title: {
-    fontSize: width * 0.075,
+    fontSize: width * 0.065,
     fontWeight: '700',
     marginBottom: height * 0.01,
     textAlign: 'center',
     color: '#333',
   },
   subtitle: {
-    fontSize: width * 0.045,
+    fontSize: width * 0.04,
     color: '#666',
     textAlign: 'center',
   },
-  searchContainer: {
-    marginBottom: height * 0.02,
-    zIndex: 2,
-  },
-  searchInputContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#f5f5f5',
-    borderRadius: width * 0.03,
-    paddingHorizontal: 15,
-    height: 50,
-  },
-  searchIcon: {
-    marginRight: 10,
-  },
-  searchInput: {
+  content: {
     flex: 1,
-    height: '100%',
-    fontSize: width * 0.04,
-    color: '#333',
-  },
-  clearButton: {
-    padding: 5,
-  },
-  searchResultsContainer: {
-    position: 'absolute',
-    top: 55,
-    left: 0,
-    right: 0,
-    backgroundColor: '#fff',
-    borderRadius: width * 0.03,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 3.84,
-    elevation: 5,
-    zIndex: 2,
-  },
-  searchResultItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 15,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
-  },
-  searchResultText: {
-    marginLeft: 10,
-    fontSize: width * 0.04,
-    color: '#333',
-  },
-  searchingIndicator: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 10,
-    backgroundColor: '#fff',
-    borderRadius: width * 0.03,
-    marginTop: 5,
-  },
-  searchingText: {
-    marginLeft: 10,
-    fontSize: width * 0.035,
-    color: '#666',
-  },
-  selectedLocationContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 15,
-    backgroundColor: '#f9f9f9',
-    borderRadius: width * 0.03,
-    padding: 12,
-  },
-  selectedLocationBadge: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  selectedLocationText: {
-    marginLeft: 10,
-    fontSize: width * 0.045,
-    fontWeight: '500',
-    color: '#333',
-  },
-  changeLocationButton: {
-    paddingVertical: 5,
-    paddingHorizontal: 10,
-    backgroundColor: '#f0f0f0',
-    borderRadius: 15,
-  },
-  changeLocationText: {
-    fontSize: width * 0.035,
-    color: '#666',
-  },
-  citiesContainer: {
-    flex: 1,
-  },
-  citiesTitle: {
-    fontSize: width * 0.04,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 10,
-  },
-  citiesList: {
-    flex: 1,
-  },
-  citiesListContent: {
-    paddingBottom: 20,
-  },
-  cityItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#f5f5f5',
-    borderRadius: width * 0.02,
-    padding: 12,
-    marginBottom: 10,
-    marginRight: 10,
-    width: '48%',
-  },
-  selectedCityItem: {
-    backgroundColor: '#fc565b',
-  },
-  cityItemIcon: {
-    marginRight: 8,
-  },
-  cityItemText: {
-    fontSize: width * 0.035,
-    color: '#333',
-    flex: 1,
-  },
-  selectedCityItemText: {
-    color: '#fff',
-    fontWeight: '500',
-  },
-  checkmark: {
-    marginLeft: 5,
   },
   radiusContainer: {
     backgroundColor: '#f9f9f9',
-    borderRadius: width * 0.03,
-    padding: 10,
-    maxHeight: height * 0.25,
-    marginTop: -height * 0.3,
+    borderRadius: 12,
+    padding: 15,
+    marginBottom: 10,
   },
   radiusLabelContainer: {
     flexDirection: 'row',
@@ -730,26 +476,48 @@ const styles = StyleSheet.create({
     width: '100%',
     height: 40,
   },
+  mapContainer: {
+    height: 200,
+    borderRadius: 10,
+    overflow: 'hidden',
+    marginTop: 15,
+  },
+  map: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  customMarker: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#fc565b',
+    borderWidth: 3,
+    borderColor: 'white',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 2,
+    elevation: 5,
+  },
+  markerInner: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: 'white',
+  },
   bottomContainer: {
-    marginTop: 'auto',
     paddingBottom: height * 0.02,
-    position: 'absolute',
-    bottom: 0,
-    left: width * 0.05,
-    right: width * 0.05,
   },
   continueButton: {
     backgroundColor: '#fc565b',
     paddingVertical: height * 0.018,
-    borderRadius: width * 0.02,
+    borderRadius: 12,
     marginBottom: height * 0.02,
     width: '100%',
     alignItems: 'center',
     shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
+    shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.2,
     shadowRadius: 3.84,
     elevation: 4,
@@ -773,87 +541,6 @@ const styles = StyleSheet.create({
     fontSize: width * 0.04,
     fontWeight: '500',
   },
-  // Map graphic styles
-  mapGraphicContainer: {
-    alignItems: 'center',
-    marginTop: 10,
-    marginBottom: 10,
-    maxHeight: height * 0.2,
-  },
-  mapBackground: {
-    position: 'relative',
-    width: Math.min(width * 0.6, height * 0.2),
-    height: Math.min(width * 0.35, height * 0.12),
-    backgroundColor: '#eff3f6',
-    borderRadius: 10,
-    overflow: 'hidden',
-  },
-  road: {
-    position: 'absolute',
-    backgroundColor: '#d9dde0',
-    height: 8,
-  },
-  cityBlock: {
-    position: 'absolute',
-    width: width * 0.07,
-    height: width * 0.07,
-    backgroundColor: '#dce4e8',
-    borderRadius: 3,
-  },
-  centerMarkerContainer: {
-    position: 'absolute',
-    top: '50%',
-    left: '50%',
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 2,
-  },
-  centerMarker: {
-    width: 16,
-    height: 16,
-    borderRadius: 8,
-    backgroundColor: '#fc565b',
-    borderWidth: 2,
-    borderColor: 'white',
-  },
-  centerPin: {
-    position: 'absolute',
-    width: 2,
-    height: 6,
-    backgroundColor: '#fc565b',
-    bottom: -4,
-    transform: [{ rotate: '45deg' }],
-  },
-  radiusCircle: {
-    position: 'absolute',
-    top: '50%',
-    left: '50%',
-    backgroundColor: 'rgba(252, 86, 91, 0.15)',
-    borderWidth: 1,
-    borderColor: 'rgba(252, 86, 91, 0.3)',
-    zIndex: 1,
-    maxWidth: '90%',
-    maxHeight: '90%',
-  },
-  legendContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 10,
-  },
-  legendText: {
-    fontSize: width * 0.032,
-    color: '#666',
-    marginRight: 10,
-    marginLeft: 4,
-  },
-  legendDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: 'rgba(252, 86, 91, 0.4)',
-    borderWidth: 1,
-    borderColor: 'rgba(252, 86, 91, 0.6)',
-  },
 });
 
-export default LocationScreen; 
+export default LocationScreen;
