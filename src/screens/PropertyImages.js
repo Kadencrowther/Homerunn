@@ -7,11 +7,15 @@ import ScheduleModal from '../components/ScheduleModal';
 import { fetchMLSData } from '../api/fetchMLSData';
 import { db } from '../config/firebase';
 import { collection, query, where, getDocs } from 'firebase/firestore';
+import AuthPromptModal from '../components/AuthPromptModal';
+import { useAuth } from '../context/AuthContext';
 
 const { width, height } = Dimensions.get('window');
 
 const PropertyImages = ({ route, navigation }) => {
   const { property: initialProperty, sourceScreen } = route.params;
+  const { isGuest } = useAuth();
+  const [showAuthPrompt, setShowAuthPrompt] = useState(false);
   const [selectedImage, setSelectedImage] = useState(null);
   const [showScheduleModal, setShowScheduleModal] = useState(false);
   const [completeProperty, setCompleteProperty] = useState(null);
@@ -170,6 +174,11 @@ const PropertyImages = ({ route, navigation }) => {
 
   // Update the Schedule button handler
   const handleSchedulePress = () => {
+    // Check if user is guest
+    if (isGuest) {
+      setShowAuthPrompt(true);
+      return;
+    }
     setShowScheduleModal(true);
   };
 
@@ -246,6 +255,17 @@ const PropertyImages = ({ route, navigation }) => {
         visible={showScheduleModal}
         onClose={() => setShowScheduleModal(false)}
         property={completeProperty || initialProperty}
+      />
+
+      {/* Auth Prompt Modal */}
+      <AuthPromptModal
+        visible={showAuthPrompt}
+        onClose={() => setShowAuthPrompt(false)}
+        onSignIn={() => {
+          setShowAuthPrompt(false);
+          navigation.navigate('Setup', { screen: 'Welcome' });
+        }}
+        message="Sign in to schedule showings and contact agents"
       />
 
       {/* Fixed Property Details Button */}

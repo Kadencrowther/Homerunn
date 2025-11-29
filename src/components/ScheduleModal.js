@@ -4,8 +4,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { db, auth } from '../config/firebase';
 import { collection, query, where, getDocs, addDoc, serverTimestamp, doc, getDoc } from 'firebase/firestore';
 import { Easing } from 'react-native';
+import { useAuth } from '../context/AuthContext';
 
 const ScheduleModal = ({ visible, onClose, property, onSubmit }) => {
+  const { isGuest } = useAuth();
   const [selectedDate, setSelectedDate] = useState('');
   const [selectedTime, setSelectedTime] = useState(null);
   const [notes, setNotes] = useState('');
@@ -290,6 +292,13 @@ const ScheduleModal = ({ visible, onClose, property, onSubmit }) => {
   };
   
   const handleSubmit = async () => {
+    // Safety check - guests should not be able to submit
+    if (isGuest) {
+      Alert.alert('Sign In Required', 'Please sign in to schedule showings');
+      onClose();
+      return;
+    }
+
     if (!selectedDate || selectedTime === null) {
       Alert.alert('Please select both a date and time');
       return;

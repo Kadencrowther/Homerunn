@@ -1,6 +1,9 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, Dimensions } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, Dimensions, Modal, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { auth, db } from '../config/firebase';
+import { fetchSignInMethodsForEmail } from 'firebase/auth';
+import { collection, query, where, getDocs } from 'firebase/firestore';
 
 const { width, height } = Dimensions.get('window');
 
@@ -10,6 +13,8 @@ const AccountCreationScreen = ({ navigation }) => {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [isCheckingEmail, setIsCheckingEmail] = useState(false);
+  const [showExistingAccountModal, setShowExistingAccountModal] = useState(false);
 
   const validatePassword = (password) => {
     return {
@@ -52,7 +57,54 @@ const AccountCreationScreen = ({ navigation }) => {
     Alert.alert('Password Requirements', message);
   };
 
-  const handleSignUp = () => {
+  const checkEmailExists = async (email) => {
+    console.log('📧 Checking if email exists:', email);
+    
+    try {
+      // Check Firebase Auth
+      console.log('🔍 Checking Firebase Auth...');
+      const signInMethods = await fetchSignInMethodsForEmail(auth, email);
+      console.log('🔍 Firebase Auth sign-in methods found:', signInMethods.length);
+      
+      if (signInMethods.length > 0) {
+        console.log('✅ Email found in Firebase Auth:', signInMethods);
+        return true;
+      }
+
+      // Check Firestore Users collection (with limit for efficiency)
+      console.log('🔍 Checking Firestore Users collection...');
+      const usersRef = collection(db, 'Users');
+      
+      // Check both possible email field locations (some users have it at top level, some in Credentials.Email)
+      const q1 = query(usersRef, where('email', '==', email.toLowerCase()));
+      const q2 = query(usersRef, where('Credentials.Email', '==', email));
+      
+      const [querySnapshot1, querySnapshot2] = await Promise.all([
+        getDocs(q1),
+        getDocs(q2)
+      ]);
+      
+      const totalResults = querySnapshot1.size + querySnapshot2.size;
+      console.log('🔍 Firestore query results:', totalResults === 0 ? 'No documents found' : `${totalResults} document(s) found`);
+      
+      const emailExists = !querySnapshot1.empty || !querySnapshot2.empty;
+      
+      if (emailExists) {
+        console.log('✅ Email found in Firestore Users collection');
+      } else {
+        console.log('✅ Email not found - available for registration');
+      }
+      
+      return emailExists;
+    } catch (error) {
+      console.error('❌ Error checking email:', error);
+      // If there's an error, allow them to continue
+      // The actual account creation will fail if email exists
+      return false;
+    }
+  };
+
+  const handleSignUp = async () => {
     if (!email || !password) {
       Alert.alert('Error', 'Please fill in all fields');
       return;
@@ -64,6 +116,16 @@ const AccountCreationScreen = ({ navigation }) => {
 
     if (!isPasswordValid) {
       showPasswordValidationAlert(passwordValidation);
+      return;
+    }
+
+    // Check if email already exists
+    setIsCheckingEmail(true);
+    const emailExists = await checkEmailExists(email);
+    setIsCheckingEmail(false);
+
+    if (emailExists) {
+      setShowExistingAccountModal(true);
       return;
     }
 
@@ -143,8 +205,13 @@ const AccountCreationScreen = ({ navigation }) => {
       <TouchableOpacity 
         style={styles.button}
         onPress={handleSignUp}
+        disabled={isCheckingEmail}
       >
-        <Text style={styles.buttonText}>Sign Up</Text>
+        {isCheckingEmail ? (
+          <ActivityIndicator color="#fff" />
+        ) : (
+          <Text style={styles.buttonText}>Sign Up</Text>
+        )}
       </TouchableOpacity>
 
       <View style={styles.orContainer}>
@@ -160,6 +227,39 @@ const AccountCreationScreen = ({ navigation }) => {
       >
         <Text style={styles.loginButtonText}>Log In</Text>
       </TouchableOpacity>
+
+      {/* Existing Account Modal */}
+      <Modal
+        visible={showExistingAccountModal}
+        animationType="fade"
+        transparent={true}
+        onRequestClose={() => setShowExistingAccountModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Ionicons name="alert-circle" size={60} color="#fc565b" style={styles.modalIcon} />
+            <Text style={styles.modalTitle}>Account Already Exists</Text>
+            <Text style={styles.modalMessage}>
+              An account with this email already exists. Please sign in instead.
+            </Text>
+            <TouchableOpacity
+              style={styles.modalButton}
+              onPress={() => {
+                setShowExistingAccountModal(false);
+                navigation.navigate('Login');
+              }}
+            >
+              <Text style={styles.modalButtonText}>Go to Sign In</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.modalCancelButton}
+              onPress={() => setShowExistingAccountModal(false)}
+            >
+              <Text style={styles.modalCancelButtonText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 };
@@ -300,6 +400,66 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.25,
     shadowRadius: 3.84,
     elevation: 5,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContent: {
+    width: width * 0.85,
+    backgroundColor: '#fff',
+    borderRadius: width * 0.04,
+    padding: width * 0.06,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  modalIcon: {
+    marginBottom: height * 0.02,
+  },
+  modalTitle: {
+    fontSize: width * 0.055,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: height * 0.015,
+    textAlign: 'center',
+  },
+  modalMessage: {
+    fontSize: width * 0.04,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: height * 0.03,
+    lineHeight: width * 0.055,
+  },
+  modalButton: {
+    backgroundColor: '#fc565b',
+    paddingVertical: height * 0.015,
+    borderRadius: width * 0.02,
+    alignItems: 'center',
+    width: '100%',
+    marginBottom: height * 0.015,
+  },
+  modalButtonText: {
+    color: '#fff',
+    fontWeight: '500',
+    fontSize: width * 0.04,
+  },
+  modalCancelButton: {
+    paddingVertical: height * 0.015,
+    alignItems: 'center',
+    width: '100%',
+  },
+  modalCancelButtonText: {
+    color: '#666',
+    fontSize: width * 0.04,
   },
 });
 

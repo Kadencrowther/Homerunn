@@ -13,6 +13,8 @@ import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { fetchMLSData } from '../api/fetchMLSData';
 import { LinearGradient } from 'expo-linear-gradient';
 import SavedFilterModal from '../components/SavedFilterModal';
+import AuthPromptModal from '../components/AuthPromptModal';
+import { useAuth } from '../context/AuthContext';
 
 // Helper function to create a mock property (add outside the component)
 const createMockProperty = (mlsId, propertyId, isLoved) => {
@@ -47,6 +49,8 @@ const getStatusColor = (status) => {
 
 const SavedScreen = () => {
   const navigation = useNavigation();
+  const { isGuest } = useAuth();
+  const [showAuthPrompt, setShowAuthPrompt] = useState(false);
   const [isFilterModalVisible, setIsFilterModalVisible] = useState(false);
   const { savedProperties, updateSavedProperty, addToSaved } = useSavedProperties();
   const [currentProperties, setCurrentProperties] = useState([]);
@@ -901,6 +905,33 @@ const SavedScreen = () => {
     ));
   };
 
+  // Show auth prompt for guests
+  if (isGuest) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.header}>
+          <View style={styles.logoContainer}>
+            <Image 
+              source={require('../../assets/Homerunnhousecolorlogo.png')} 
+              style={styles.logo}
+            />
+            <Text style={styles.logoText}>HOMERUNN</Text>
+          </View>
+        </View>
+        <View style={styles.emptyContainer}>
+          <Ionicons name="heart-outline" size={80} color="#ccc" />
+          <Text style={styles.emptyText}>Sign in to save your favorite homes</Text>
+          <TouchableOpacity 
+            style={styles.signInButton}
+            onPress={() => navigation.navigate('Setup', { screen: 'Welcome' })}
+          >
+            <Text style={styles.signInButtonText}>Sign In</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
@@ -1052,6 +1083,20 @@ const styles = StyleSheet.create({
     fontSize: 18,
     color: '#666',
     fontWeight: '500',
+    marginTop: 20,
+    marginBottom: 20,
+  },
+  signInButton: {
+    backgroundColor: '#fc565b',
+    paddingVertical: 12,
+    paddingHorizontal: 30,
+    borderRadius: 8,
+    marginTop: 10,
+  },
+  signInButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
   },
   starIconContainer: {
     position: 'absolute',

@@ -6,6 +6,7 @@ import MapView, { PROVIDER_GOOGLE, Marker, Callout } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { auth, db } from '../config/firebase';
 import { doc, getDoc } from 'firebase/firestore';
+import { useAuth } from '../context/AuthContext';
 
 const { width, height } = Dimensions.get('window');
 
@@ -18,6 +19,7 @@ const CustomMarker = () => (
 
 const FlashScreen = () => {
   const navigation = useNavigation();
+  const { isGuest } = useAuth();
   const [userData, setUserData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [address, setAddress] = useState('');
@@ -127,6 +129,25 @@ const FlashScreen = () => {
     }
   };
 
+  // Show guest UI for guests
+  if (isGuest) {
+    return (
+      <View style={styles.guestContainer}>
+        <Ionicons name="flash-outline" size={80} color="#ccc" />
+        <Text style={styles.guestTitle}>Sign In Required</Text>
+        <Text style={styles.guestMessage}>
+          Sign in to access tools, connect with agents, and get pre-qualified for loans
+        </Text>
+        <TouchableOpacity 
+          style={styles.guestSignInButton}
+          onPress={() => navigation.navigate('Setup', { screen: 'Welcome' })}
+        >
+          <Text style={styles.guestSignInButtonText}>Sign In</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
   return (
     <ScrollView contentContainerStyle={styles.scrollContainer}>
       {/* Home Card - Updated */}
@@ -221,6 +242,38 @@ const FlashScreen = () => {
 };
 
 const styles = StyleSheet.create({
+  guestContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 30,
+    backgroundColor: '#f8f8f8',
+  },
+  guestTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#333',
+    marginTop: 20,
+    marginBottom: 15,
+  },
+  guestMessage: {
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 30,
+    lineHeight: 24,
+  },
+  guestSignInButton: {
+    backgroundColor: '#fc565b',
+    paddingVertical: 14,
+    paddingHorizontal: 40,
+    borderRadius: 8,
+  },
+  guestSignInButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
   scrollContainer: {
     paddingHorizontal: width * 0.04,
     paddingTop: height * 0.08,

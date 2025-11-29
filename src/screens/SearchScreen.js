@@ -9,6 +9,10 @@ import * as Location from 'expo-location';
 import { auth, db } from '../config/firebase';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import FilterModal from '../components/FilterModal';
+import AuthPromptModal from '../components/AuthPromptModal';
+import { useAuth } from '../context/AuthContext';
+import { createGuestModeFilter } from '../utils/guestModeLocation';
+import { Dimensions } from 'react-native';
 
 // Sample data for properties
 const properties = [
@@ -110,6 +114,8 @@ const getStatusColor = (status) => {
 
 const SearchScreen = () => {
   const navigation = useNavigation();
+  const { isGuest } = useAuth();
+  const [showAuthPrompt, setShowAuthPrompt] = useState(false);
   const { savedProperties, updateSavedProperty, addToSaved } = useSavedProperties();
   const [searchQuery, setSearchQuery] = useState('');
   const [filteredProperties, setFilteredProperties] = useState(properties);
@@ -158,6 +164,38 @@ const SearchScreen = () => {
   // Add this state to track if the button has been pressed
   const [hasSearchedCurrentArea, setHasSearchedCurrentArea] = useState(false);
   const buttonColorAnim = useRef(new Animated.Value(0)).current;
+  
+  // Apply guest mode filter on mount if user is guest
+  useEffect(() => {
+    const applyGuestFilter = async () => {
+      if (isGuest && !filtersApplied) {
+        console.log('Guest mode detected in SearchScreen - applying default guest filter...');
+        try {
+          const { width, height } = Dimensions.get('window');
+          const guestFilter = await createGuestModeFilter(width, height);
+          console.log('Guest filter created for SearchScreen:', guestFilter);
+          
+          // Update filter state
+          setFilters(guestFilter);
+          setFiltersApplied(true);
+          
+          // Update map region to the guest filter location
+          if (guestFilter.mapRegion) {
+            setRegion(guestFilter.mapRegion);
+            
+            // Animate map to the new region
+            if (mapRef.current) {
+              mapRef.current.animateToRegion(guestFilter.mapRegion, 1000);
+            }
+          }
+        } catch (error) {
+          console.error('Error creating guest filter for SearchScreen:', error);
+        }
+      }
+    };
+    
+    applyGuestFilter();
+  }, [isGuest, filtersApplied]);
   
   // Filter cities based on search query
   useEffect(() => {
@@ -463,6 +501,12 @@ const SearchScreen = () => {
     if (event) {
       event.stopPropagation();
       event.preventDefault();
+    }
+    
+    // Check if user is guest - if so, show auth prompt
+    if (isGuest) {
+      setShowAuthPrompt(true);
+      return;
     }
     
     // Set our ref to indicate the heart was tapped
@@ -1375,6 +1419,17 @@ const SearchScreen = () => {
           </Animated.Text>
         </TouchableOpacity>
       </Animated.View>
+
+      {/* Auth Prompt Modal */}
+      <AuthPromptModal
+        visible={showAuthPrompt}
+        onClose={() => setShowAuthPrompt(false)}
+        onSignIn={() => {
+          setShowAuthPrompt(false);
+          navigation.navigate('Setup', { screen: 'Welcome' });
+        }}
+        message="Sign in to save your favorite homes"
+      />
     </View>
   );
 };

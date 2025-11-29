@@ -8,7 +8,7 @@ const { width, height } = Dimensions.get('window');
 
 const WelcomeScreen = ({ navigation }) => {
   const [isTermsModalVisible, setIsTermsModalVisible] = useState(false);
-  const { signInWithApple } = useAuth();
+  const { signInWithApple, continueAsGuest } = useAuth();
   const [gifFinished, setGifFinished] = useState(false);
   const [gifKey, setGifKey] = useState(0);
   const animatedValue = useRef(new Animated.Value(0)).current;
@@ -98,7 +98,8 @@ const WelcomeScreen = ({ navigation }) => {
       
       // Sign in with Apple credential
       await signInWithApple(credential);
-      navigation.navigate('UserInfo');
+      // Navigation will be handled by App.js based on auth state
+      console.log('✅ Apple Sign In complete, App.js will handle navigation');
     } catch (error) {
       if (error.code === 'ERR_CANCELED') {
         // User canceled the sign-in flow
@@ -108,6 +109,12 @@ const WelcomeScreen = ({ navigation }) => {
         Alert.alert('Sign In Error', 'Failed to sign in with Apple. Please try again.');
       }
     }
+  };
+
+  const handleGuestContinue = () => {
+    continueAsGuest();
+    // Navigate directly to the App (HomeScreen will be shown via tab navigator)
+    navigation.navigate('App');
   };
 
   return (
@@ -151,7 +158,7 @@ const WelcomeScreen = ({ navigation }) => {
           onPress={handleAppleSignIn}
         >
           <View style={styles.appleButtonContent}>
-            <Ionicons name="logo-apple" size={width * 0.05} color="#fff" />
+            <Ionicons name="logo-apple" size={width * 0.045} color="#fff" />
             <Text style={styles.appleButtonText}>Continue with Apple</Text>
           </View>
         </TouchableOpacity>
@@ -160,11 +167,21 @@ const WelcomeScreen = ({ navigation }) => {
           style={styles.emailButton}
           onPress={handleEmailSignIn}
         >
-          <Text style={styles.emailButtonText}>Continue with Email</Text>
+          <View style={styles.emailButtonContent}>
+            <Ionicons name="mail" size={width * 0.045} color="#fc565b" />
+            <Text style={styles.emailButtonText}>Continue with Email</Text>
+          </View>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.guestButton}
+          onPress={handleGuestContinue}
+        >
+          <Text style={styles.guestButtonText}>Continue as Guest</Text>
         </TouchableOpacity>
 
         <Text style={styles.authExplanationText}>
-          Homerunn requires an account to curate homes and preferences to your needs. By continuing, you are accepting all of Homerunn's{' '}
+          By continuing, you are accepting all of Homerunn's{' '}
           <Text style={styles.termsLinkTextInline} onPress={() => setIsTermsModalVisible(true)}>
             Terms and Conditions
         </Text>
@@ -285,11 +302,11 @@ const styles = StyleSheet.create({
   },
   appleButton: {
     backgroundColor: '#000',
-    paddingVertical: height * 0.012,
+    paddingVertical: height * 0.01,
     borderRadius: width * 0.02,
     alignItems: 'center',
-    marginBottom: height * 0.015,
-    width: width * 0.85,
+    marginBottom: height * 0.012,
+    width: width * 0.75,
     borderWidth: 0,
     zIndex: 20,
   },
@@ -298,13 +315,29 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  emailButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   emailButton: {
-    backgroundColor: '#fc565b',
-    paddingVertical: height * 0.012,
+    backgroundColor: '#fff',
+    paddingVertical: height * 0.01,
+    borderRadius: width * 0.02,
+    alignItems: 'center',
+    marginBottom: height * 0.012,
+    width: width * 0.75,
+    borderWidth: 2,
+    borderColor: '#fff',
+    zIndex: 20,
+  },
+  guestButton: {
+    backgroundColor: 'transparent',
+    paddingVertical: height * 0.01,
     borderRadius: width * 0.02,
     alignItems: 'center',
     marginBottom: height * 0.015,
-    width: width * 0.85,
+    width: width * 0.75,
     borderWidth: 2,
     borderColor: '#fff',
     zIndex: 20,
@@ -312,19 +345,25 @@ const styles = StyleSheet.create({
   buttonText: {
     color: '#fc565b',
     fontWeight: '500',
-    fontSize: width * 0.04,
+    fontSize: width * 0.035,
     marginLeft: width * 0.02,
   },
   appleButtonText: {
     color: '#fff',
     fontWeight: '500',
-    fontSize: width * 0.04,
+    fontSize: width * 0.035,
     marginLeft: width * 0.02,
   },
   emailButtonText: {
+    color: '#fc565b',
+    fontWeight: '500',
+    fontSize: width * 0.035,
+    marginLeft: width * 0.02,
+  },
+  guestButtonText: {
     color: '#fff',
     fontWeight: '500',
-    fontSize: width * 0.04,
+    fontSize: width * 0.035,
   },
   termsText: {
     fontSize: 14,

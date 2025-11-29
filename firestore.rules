@@ -38,6 +38,10 @@ service cloud.firestore {
       // Allow create if the user is authenticated and the userId matches their auth ID
       allow create: if request.auth != null && request.auth.uid == userId;
       
+      // Allow unauthenticated users to check if email exists (for account creation validation)
+      // This allows queries like: where('email', '==', 'test@example.com').limit(1)
+      allow get, list: if request.auth == null;
+      
       // Allow read if the user is authenticated and the document belongs to them
       allow read: if request.auth != null && (
         request.auth.uid == userId || 

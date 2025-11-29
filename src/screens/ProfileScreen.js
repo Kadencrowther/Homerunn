@@ -10,6 +10,8 @@ import MapView, { Circle, Marker } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { initializeUserMatchMetric } from '../utils/UserMatchMetric';
 import NotificationModal from '../components/NotificationModal';
+import AuthPromptModal from '../components/AuthPromptModal';
+import { useAuth } from '../context/AuthContext';
 import Constants from 'expo-constants';
 
 const { width } = Dimensions.get('window');
@@ -72,6 +74,7 @@ const propertyPreferences = [
 ];
 
 const ProfileScreen = ({ navigation }) => {
+  const { isGuest } = useAuth();
   const [isDeactivateModalVisible, setIsDeactivateModalVisible] = useState(false);
   const [isSignOutModalVisible, setIsSignOutModalVisible] = useState(false);
   const [isEditProfileModalVisible, setIsEditProfileModalVisible] = useState(false);
@@ -1021,6 +1024,29 @@ const ProfileScreen = ({ navigation }) => {
     );
   };
 
+  // Show guest UI for guests
+  if (isGuest) {
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        <View style={styles.guestContainer}>
+          <View style={styles.guestAvatarContainer}>
+            <Ionicons name="person-outline" size={80} color="#ccc" />
+          </View>
+          <Text style={styles.guestTitle}>Guest Mode</Text>
+          <Text style={styles.guestMessage}>
+            Sign in to save your preferences, view saved homes, and get personalized recommendations
+          </Text>
+          <TouchableOpacity 
+            style={styles.guestSignInButton}
+            onPress={() => navigation.navigate('Setup', { screen: 'Welcome' })}
+          >
+            <Text style={styles.guestSignInButtonText}>Sign In</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer} ref={formScrollViewRef}>
@@ -1503,6 +1529,40 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: '#f8f8f8',
+  },
+  guestContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 30,
+    backgroundColor: '#f8f8f8',
+  },
+  guestAvatarContainer: {
+    marginBottom: 20,
+  },
+  guestTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 15,
+  },
+  guestMessage: {
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 30,
+    lineHeight: 24,
+  },
+  guestSignInButton: {
+    backgroundColor: '#fc565b',
+    paddingVertical: 14,
+    paddingHorizontal: 40,
+    borderRadius: 8,
+  },
+  guestSignInButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
   },
   container: {
     flex: 1,

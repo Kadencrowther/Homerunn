@@ -5,11 +5,15 @@ import { formatPrice } from '../utils/formatters';
 import ScheduleModal from '../components/ScheduleModal';
 import { fetchMLSData } from '../api/fetchMLSData';
 import { LinearGradient } from 'expo-linear-gradient';
+import AuthPromptModal from '../components/AuthPromptModal';
+import { useAuth } from '../context/AuthContext';
 
 const { width: screenWidth } = Dimensions.get('window');
 
 const PropertyDetails = ({ route, navigation }) => {
   const { property: initialProperty } = route.params;
+  const { isGuest } = useAuth();
+  const [showAuthPrompt, setShowAuthPrompt] = useState(false);
   const [showScheduleModal, setShowScheduleModal] = useState(false);
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [notes, setNotes] = useState('');
@@ -541,7 +545,13 @@ const PropertyDetails = ({ route, navigation }) => {
       {/* Schedule button */}
       <TouchableOpacity 
         style={styles.scheduleButton}
-        onPress={() => setShowScheduleModal(true)}
+        onPress={() => {
+          if (isGuest) {
+            setShowAuthPrompt(true);
+          } else {
+            setShowScheduleModal(true);
+          }
+        }}
       >
         <MaterialCommunityIcons name="calendar" size={20} color="#fff" />
         <Text style={styles.scheduleButtonText}>Schedule</Text>
@@ -863,7 +873,13 @@ const PropertyDetails = ({ route, navigation }) => {
           <Text style={styles.contactTitle}>Interested in this property?</Text>
           <TouchableOpacity 
             style={styles.contactButton}
-            onPress={() => setShowScheduleModal(true)}
+            onPress={() => {
+              if (isGuest) {
+                setShowAuthPrompt(true);
+              } else {
+                setShowScheduleModal(true);
+              }
+            }}
           >
             <Text style={styles.contactButtonText}>Schedule a Showing</Text>
           </TouchableOpacity>
@@ -878,6 +894,17 @@ const PropertyDetails = ({ route, navigation }) => {
         visible={showScheduleModal}
         onClose={() => setShowScheduleModal(false)}
         property={mappedProperty}
+      />
+
+      {/* Auth Prompt Modal */}
+      <AuthPromptModal
+        visible={showAuthPrompt}
+        onClose={() => setShowAuthPrompt(false)}
+        onSignIn={() => {
+          setShowAuthPrompt(false);
+          navigation.navigate('Setup', { screen: 'Welcome' });
+        }}
+        message="Sign in to schedule showings and contact agents"
       />
     </View>
   );

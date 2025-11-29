@@ -19,8 +19,11 @@ import ShimmerCards from '../components/ShimmerCards';
 import LoadingCards from '../components/LoadingCards';
 import PlaceholderImage from '../components/PlaceholderImage';
 import NotificationDropdown from '../components/NotificationDropdown';
+import AuthPromptModal from '../components/AuthPromptModal';
 import { getUserMatchMetric, updateUserMatchMetric, processPropertiesForUser, sortPropertiesByMatchScore, calculateMatchScore, getUserSwipeCount } from '../utils/UserMatchMetric';
 import { getPropertyMatchMetric } from '../utils/PropertyMatchMetric';
+import { useAuth } from '../context/AuthContext';
+import { createGuestModeFilter } from '../utils/guestModeLocation';
 
 // Screen dimensions
 const { width, height } = Dimensions.get('window');
@@ -34,6 +37,7 @@ const CARD_HEIGHT = height - HEADER_HEIGHT - TAB_BAR_HEIGHT - (CARD_MARGIN * 2) 
 
 const HomeScreen = () => {
   const navigation = useNavigation();
+  const { isGuest } = useAuth();
 
   // Add this function to determine badge color based on status
   const getStatusColor = (status) => {
@@ -131,6 +135,9 @@ const HomeScreen = () => {
 
   // Add state to track if HomeScreen has been initialized
   const [hasBeenInitialized, setHasBeenInitialized] = useState(false);
+
+  // Add state for auth prompt modal
+  const [showAuthPrompt, setShowAuthPrompt] = useState(false);
 
   // 4) Define all functions BEFORE any conditional returns
   // Use useCallback to prevent unnecessary re-renders
@@ -306,6 +313,12 @@ const HomeScreen = () => {
 
   // Modify the handleSwipe function to use the stable/future deck concept
   const handleSwipe = useCallback((cardIndex, direction) => {
+    // Check if user is guest - if so, show auth prompt and prevent swipe
+    if (isGuest) {
+      setShowAuthPrompt(true);
+      return;
+    }
+
     handleInteraction();
     const swipedCard = currentDeck[cardIndex];
     if (!swipedCard) return;
@@ -448,7 +461,7 @@ const HomeScreen = () => {
         console.error('Error updating user match metric:', error);
       });
     }
-  }, [addToSaved, animateHeart, currentDeck, handleInteraction, cardCategories, removeFromSaved, setDislikedProperties, setLikedProperties, setLovedProperties, setUserMatchMetric, currentIndex, setCurrentDeckWithProtection, redoInProgress, isUndoInProgress, redoCardId, stableDeck, futureDeck, STABLE_DECK_SIZE, paginationInfo, currentFilters]);
+  }, [addToSaved, animateHeart, currentDeck, handleInteraction, cardCategories, removeFromSaved, setDislikedProperties, setLikedProperties, setLovedProperties, setUserMatchMetric, currentIndex, setCurrentDeckWithProtection, redoInProgress, isUndoInProgress, redoCardId, stableDeck, futureDeck, STABLE_DECK_SIZE, paginationInfo, currentFilters, isGuest]);
 
   // Modify the loadMorePropertiesInBackground function to use the stable/future deck concept
   const loadMorePropertiesInBackground = useCallback(async (nextPageToken, filters, initialCount = 0) => {
@@ -1019,28 +1032,46 @@ const HomeScreen = () => {
 
   // Initial data loading when component mounts
   useEffect(() => {
-    // Load user match metric first
-    loadUserMatchMetric();
-    
-    // Check for active filters when component first mounts
-    if (auth.currentUser?.uid) {
-      console.log('HomeScreen mounted - polling for active filters...');
-      pollForActiveFilter().then(() => {
+    const initializeHomeScreen = async () => {
+      // Load user match metric first
+      loadUserMatchMetric();
+      
+      // Check for active filters when component first mounts
+      if (auth.currentUser?.uid) {
+        console.log('HomeScreen mounted - polling for active filters...');
+        await pollForActiveFilter();
         setHasBeenInitialized(true);
-      });
-    } else {
-      // No user logged in, load all data
-      console.log('No user logged in on mount, loading all data');
-      loadInitialData(null).then(() => {
+      } else if (isGuest) {
+        // Guest mode - apply default guest filter
+        console.log('Guest mode detected - applying default guest filter...');
+        try {
+          const guestFilter = await createGuestModeFilter(width, height);
+          console.log('Guest filter created:', guestFilter);
+          setFilters(guestFilter);
+          setFiltersApplied(true);
+          await loadInitialData(guestFilter);
+          setHasBeenInitialized(true);
+        } catch (error) {
+          console.error('Error creating guest filter:', error);
+          // Fall back to loading all data
+          await loadInitialData(null);
+          setHasBeenInitialized(true);
+        }
+      } else {
+        // No user logged in and not guest, load all data
+        console.log('No user logged in on mount, loading all data');
+        await loadInitialData(null);
         setHasBeenInitialized(true);
-      });
-    }
+      }
+      
+      // Check if the user has seen the tutorial
+      checkTutorialStatus();
+    };
     
-    // Check if the user has seen the tutorial
-    checkTutorialStatus();
+    initializeHomeScreen();
     
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [isGuest]);
 
   useEffect(() => {
     const unsubscribe = navigation.addListener('focus', () => {
@@ -1705,6 +1736,18 @@ const HomeScreen = () => {
         visible={showNotificationDropdown}
         onClose={() => setShowNotificationDropdown(false)}
         notifications={[]} // Empty array for now - will be populated with real notifications later
+      />
+
+      {/* Auth Prompt Modal */}
+      <AuthPromptModal
+        visible={showAuthPrompt}
+        onClose={() => setShowAuthPrompt(false)}
+        onSignIn={() => {
+          setShowAuthPrompt(false);
+          // Navigate to welcome screen to sign in
+          navigation.navigate('Setup', { screen: 'Welcome' });
+        }}
+        message="Sign in to start swiping and saving homes to your favorites"
       />
     </TouchableOpacity>
   );

@@ -13,11 +13,13 @@ const AuthContext = createContext({});
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [isGuest, setIsGuest] = useState(false);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       if (user) {
         setUser(user);
+        setIsGuest(false);
       } else {
         setUser(null);
       }
@@ -37,6 +39,8 @@ export const AuthProvider = ({ children }) => {
       
       const userCredential = await signInWithCredential(auth, oauthCredential);
       const user = userCredential.user;
+      
+      setIsGuest(false);
       
       // Create or update user document in Firestore
       const userDocRef = doc(db, 'Users', user.uid);
@@ -68,7 +72,14 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
+  const continueAsGuest = () => {
+    console.log('Guest mode activated');
+    setIsGuest(true);
+    setUser(null);
+  };
+
   const logout = () => {
+    setIsGuest(false);
     return signOut(auth);
   };
 
@@ -76,7 +87,9 @@ export const AuthProvider = ({ children }) => {
     <AuthContext.Provider value={{
       user,
       loading,
+      isGuest,
       signInWithApple,
+      continueAsGuest,
       logout
     }}>
       {!loading && children}
