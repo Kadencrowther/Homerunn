@@ -142,14 +142,43 @@ const NotificationSetupScreen = ({ navigation, route }) => {
         console.log('📱 Permission granted:', permissionGranted);
         
         if (permissionGranted) {
-          // Get push token
+          // Get push token with explicit projectId (with timeout)
           let token = null;
+          let deviceId = null;
+          
           try {
-            const tokenData = await Notifications.getExpoPushTokenAsync();
+            // Import Constants to get projectId
+            const Constants = require('expo-constants').default;
+            const projectId = Constants.expoConfig?.extra?.eas?.projectId || 
+                             Constants.easConfig?.projectId ||
+                             'c9d6dcde-524c-4058-b8d0-2ba7c32d1219';
+            
+            console.log('📱 Getting Expo push token with projectId:', projectId);
+            
+            // Add 3 second timeout to prevent hanging
+            const tokenPromise = Notifications.getExpoPushTokenAsync({ projectId });
+            const timeoutPromise = new Promise((_, reject) => 
+              setTimeout(() => reject(new Error('Token fetch timeout after 3s')), 3000)
+            );
+            
+            const tokenData = await Promise.race([tokenPromise, timeoutPromise]);
             token = tokenData.data;
-            console.log('📱 Got push token for onboarding:', token?.substring(0, 20) + '...');
+            
+            // Get device ID
+            const AsyncStorage = require('@react-native-async-storage/async-storage').default;
+            deviceId = await AsyncStorage.getItem('@studiosync_device_id');
+            if (!deviceId) {
+              deviceId = `${Platform.OS}-${Date.now()}-${Math.random().toString(36).substring(7)}`;
+              await AsyncStorage.setItem('@studiosync_device_id', deviceId);
+            }
+            
+            console.log('✅ FULL EXPO PUSH TOKEN:', token);
+            console.log('📱 Device ID:', deviceId);
+            console.log('📱 Platform:', Platform.OS);
+            
           } catch (error) {
-            console.log('⚠️ Could not get push token:', error.message);
+            console.error('⚠️ Could not get push token:', error.message);
+            console.log('⚠️ Continuing without token - will be collected later');
           }
           
           // Pass notification data in params to be saved when account is created
@@ -158,11 +187,15 @@ const NotificationSetupScreen = ({ navigation, route }) => {
             notificationData: {
               permissionsGranted: true,
               pushToken: token,
+              deviceId: deviceId,
+              platform: Platform.OS,
               notificationsEnabled: true
             }
           };
           
-          console.log('✅ Notification permissions granted - will save when account is created. Auto-navigating...');
+          console.log('✅ Notification data collected - will save when account is created');
+          console.log('📦 Notification data to save:', updatedParams.notificationData);
+          console.log('🚀 Auto-navigating to Congratulations...');
           navigation.navigate('Congratulations', updatedParams);
         } else {
           console.log('⚠️ Notification permissions denied. Auto-navigating...');
