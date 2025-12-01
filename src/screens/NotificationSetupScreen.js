@@ -124,16 +124,14 @@ const NotificationSetupScreen = ({ navigation, route }) => {
       if (userId) {
         // User is already authenticated (Apple Sign In) - save directly to Firestore
         console.log('✅ User authenticated - saving notifications directly');
-        const success = await deviceNotificationService.enableNotificationsForCurrentUser(userId);
         
-        if (success) {
-          console.log('✅ Notifications enabled successfully!');
-          Alert.alert('Success!', 'Notifications enabled. You\'ll receive updates about new listings and price changes.');
-        } else {
-          console.log('⚠️ Notification permissions denied or failed');
-          Alert.alert('Notifications Not Enabled', 'You can enable notifications later in your profile settings.');
-        }
+        // Fire off notification enablement in background (don't wait for it)
+        deviceNotificationService.enableNotificationsForCurrentUser(userId)
+          .then(() => console.log('✅ Notifications enabled successfully!'))
+          .catch((error) => console.log('⚠️ Notification setup failed:', error.message));
         
+        // Navigate immediately (don't wait for notification setup)
+        console.log('🚀 Navigating to Congratulations screen immediately...');
         navigation.navigate('Congratulations', route.params);
       } else {
         // User NOT authenticated yet (Email Sign In) - collect token and save in params
@@ -164,19 +162,17 @@ const NotificationSetupScreen = ({ navigation, route }) => {
             }
           };
           
-          console.log('✅ Notification permissions granted - will save when account is created');
-          Alert.alert('Success!', 'Notifications will be enabled when your account is created.');
+          console.log('✅ Notification permissions granted - will save when account is created. Auto-navigating...');
           navigation.navigate('Congratulations', updatedParams);
         } else {
-          console.log('⚠️ Notification permissions denied');
-          Alert.alert('Notifications Not Enabled', 'You can enable notifications later in your profile settings.');
+          console.log('⚠️ Notification permissions denied. Auto-navigating...');
           navigation.navigate('Congratulations', route.params);
         }
       }
       
     } catch (error) {
-      console.error('Notification error:', error);
-      Alert.alert('Error', 'Something went wrong with notifications. You can enable them later in settings.');
+      console.error('❌ Notification error:', error);
+      console.log('🚀 Navigating to Congratulations despite error...');
       navigation.navigate('Congratulations', route.params);
     }
   };

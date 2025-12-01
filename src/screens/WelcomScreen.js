@@ -98,8 +98,9 @@ const WelcomeScreen = ({ navigation }) => {
       
       // Sign in with Apple credential
       await signInWithApple(credential);
-      // Navigation will be handled by App.js based on auth state
-      console.log('✅ Apple Sign In complete, App.js will handle navigation');
+      // Navigate to UserInfo screen to continue onboarding
+      console.log('✅ Apple Sign In complete, navigating to UserInfo');
+      navigation.navigate('UserInfo', { credentials: {} });
     } catch (error) {
       if (error.code === 'ERR_CANCELED') {
         // User canceled the sign-in flow

@@ -86,11 +86,12 @@ const ReviewScreen = ({ navigation, route }) => {
   
   const handleReviewRequest = async () => {
     // App Store and Play Store URLs 
-    const APP_STORE_ID = 'YOUR_APP_ID'; // Replace with your actual App Store ID
-    const PLAY_STORE_PACKAGE = 'YOUR_PACKAGE_NAME'; // Replace with your actual package name
+    const APP_STORE_ID = '6746081203'; // Homerunn App Store ID
+    const PLAY_STORE_PACKAGE = 'com.homerunn.app';
   
-    const appStoreUrl = `https://apps.apple.com/app/id${APP_STORE_ID}?action=write-review`;
-    const playStoreUrl = `https://play.google.com/store/apps/details?id=${PLAY_STORE_PACKAGE}&reviewId=0`;
+    // Simple web URLs - opens in Safari/browser
+    const appStoreUrl = `https://apps.apple.com/us/app/homerunn-swipe-on-homes/id${APP_STORE_ID}`;
+    const playStoreUrl = `https://play.google.com/store/apps/details?id=${PLAY_STORE_PACKAGE}`;
   
     const url = Platform.OS === 'ios' ? appStoreUrl : playStoreUrl;
     

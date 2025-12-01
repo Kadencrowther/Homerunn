@@ -26,8 +26,9 @@ import Spinner from '../components/Spinner';
 const { width, height } = Dimensions.get('window');
 
 const SettingEverythingUpScreen = ({ navigation, route }) => {
-  const [statusMessage, setStatusMessage] = useState('Initializing...');
-  const { completeOnboarding } = useOnboarding();
+  const [progress, setProgress] = useState(0);
+  const [currentStep, setCurrentStep] = useState('Starting setup...');
+  const { completeOnboarding, hasCompletedOnboarding } = useOnboarding();
   
   // Extract all parameters from the navigation chain
   const params = route.params || {};
@@ -99,11 +100,13 @@ const SettingEverythingUpScreen = ({ navigation, route }) => {
   // Refs to track process completion
   const isAuthComplete = useRef(false);
   const isSetupComplete = useRef(false);
+  const hasNavigated = useRef(false);
   
   // Animation values
   const titleOpacity = useSharedValue(0);
   const messageOpacity = useSharedValue(0);
   const statusOpacity = useSharedValue(0);
+  const progressWidth = useSharedValue(0);
 
   // Animated styles
   const titleAnimatedStyle = useAnimatedStyle(() => {
@@ -125,6 +128,12 @@ const SettingEverythingUpScreen = ({ navigation, route }) => {
     };
   });
 
+  const progressAnimatedStyle = useAnimatedStyle(() => {
+    return {
+      width: `${progressWidth.value}%`,
+    };
+  });
+
   // Start animations when component mounts
   useEffect(() => {
     titleOpacity.value = withTiming(1, { duration: 800 });
@@ -134,43 +143,55 @@ const SettingEverythingUpScreen = ({ navigation, route }) => {
     // Start the authentication and setup process
     setupUserAccount();
   }, []);
+
+  // Monitor onboarding completion and navigate when ready
+  useEffect(() => {
+    if (hasCompletedOnboarding && progress === 100 && !hasNavigated.current) {
+      console.log('✅ All conditions met: progress 100%, context updated, navigating now');
+      hasNavigated.current = true;
+      
+      setTimeout(() => {
+        navigation.reset({
+          index: 0,
+          routes: [{ name: 'App' }],
+        });
+      }, 500);
+    }
+  }, [hasCompletedOnboarding, progress]);
   
   const setupUserAccount = async () => {
     try {
-      // Check if user is already authenticated (e.g., from Apple Sign In)
+      // Step 1: Authentication (0% → 25%)
+      setCurrentStep('Authenticating...');
       const currentUser = auth.currentUser;
       
       if (!currentUser) {
-        // Step 1: Create user account (only if not already authenticated)
         console.log('No authenticated user found, creating account with email/password');
         await createUserAccount();
       } else {
-        // User is already authenticated (from Apple Sign In or other method)
         console.log('User already authenticated:', currentUser.uid);
         console.log('Auth provider:', currentUser.providerData[0]?.providerId || 'unknown');
-        setStatusMessage('Account already authenticated, setting up your profile...');
         isAuthComplete.current = true;
       }
       
-      // Step 2: Set up user preferences (merge with existing document if needed)
+      setProgress(25);
+      progressWidth.value = withTiming(25, { duration: 300 });
+      console.log('✅ Step 1/4 complete: Authentication (25%)');
+      
+      // Step 2: Set up user preferences
       await setupUserPreferences();
       
-      // Log completion but don't navigate
-      console.log('All setup steps completed successfully');
-      console.log('Setup process complete - waiting for manual navigation');
-      
-      // No automatic navigation - this will be handled elsewhere
+      console.log('✅ All setup steps completed successfully');
       
     } catch (error) {
       console.error('Setup process error:', error);
-      setStatusMessage('Something went wrong. Please try again.');
+      setCurrentStep('Setup failed. Please try again.');
       console.log('Setup failed, not navigating automatically');
     }
   };
 
   const createUserAccount = async () => {
     try {
-      setStatusMessage('Setting up your account...');
       console.log('Starting account creation with:', Credentials);
       
       const { Email, Password } = Credentials;
@@ -182,36 +203,31 @@ const SettingEverythingUpScreen = ({ navigation, route }) => {
 
       let userCredential;
       try {
-        // Create the Firebase user account
         userCredential = await createUserWithEmailAndPassword(auth, Email, Password);
         console.log('User account created successfully');
-        setStatusMessage('Account created successfully!');
       } catch (error) {
-        // If creation fails, try to sign in instead - user might exist already
         console.log('Error creating user, attempting to sign in:', error.message);
-        setStatusMessage('Signing in to your account...');
         userCredential = await signInWithEmailAndPassword(auth, Email, Password);
         console.log('Authentication successful');
       }
 
-      // Make sure we have a user object from either creation or sign-in
       if (!userCredential || !userCredential.user) {
         throw new Error('Failed to obtain user credentials after auth');
       }
       
       isAuthComplete.current = true;
-      setStatusMessage('Authentication successful!');
       
     } catch (error) {
       console.error('Account creation/auth error:', error);
-      isAuthComplete.current = false; // Mark as failed
+      isAuthComplete.current = false;
       throw error;
     }
   };
 
   const setupUserPreferences = async () => {
     try {
-      setStatusMessage('Setting up your preferences...');
+      // Step 2: Save preferences (25% → 50%)
+      setCurrentStep('Saving your preferences...');
       console.log('Setting up user preferences with data:', { 
         Profile, 
         Preferences, 
@@ -222,13 +238,11 @@ const SettingEverythingUpScreen = ({ navigation, route }) => {
         MarketingSource
       });
       
-      // Make sure we have a user
       const currentUser = auth.currentUser;
       if (!currentUser) {
         throw new Error('No authenticated user found when saving preferences');
       }
       
-      // Get notification data from params if it exists (collected during onboarding)
       const notificationData = route.params?.notificationData;
       console.log('Notification data from onboarding:', notificationData);
       
@@ -260,70 +274,52 @@ const SettingEverythingUpScreen = ({ navigation, route }) => {
       console.log('User data prepared for database in PascalCase:', userData);
       console.log('Credentials included:', !!Credentials);
       console.log('Firebase Auth User ID saved to document:', currentUser.uid);
-      setStatusMessage('Saving your profile to our database...');
       
       try {
-        // Save to Firestore in the Users collection
+        // Save to Firestore
         const userDocRef = doc(db, 'Users', currentUser.uid);
-        
-        // Use merge: true to update existing document (from Apple Sign In) or create if it doesn't exist
         await setDoc(userDocRef, userData, { merge: true });
         console.log('User data successfully saved to Firestore with merge!');
-        console.log('This preserves any existing fields from Apple Sign In and adds onboarding data');
         
-        // Create default filter based on user preferences
-        setStatusMessage('Creating your personalized filter...');
+        setProgress(50);
+        progressWidth.value = withTiming(50, { duration: 300 });
+        console.log('✅ Step 2/4 complete: User data saved (50%)');
+        
+        // Step 3: Create default filter (50% → 75%)
+        setCurrentStep('Creating your personalized filter...');
         try {
           await createDefaultFilterFromPreferences(currentUser.uid, userData);
           console.log('Default filter created successfully!');
-          console.log('✅ FILTER SET SUCCESSFULLY - READY FOR NAVIGATION');
         } catch (filterError) {
           console.error('Error creating default filter:', filterError);
-          // Don't fail the entire setup if filter creation fails
         }
         
-        // Verify data was saved
-        setStatusMessage('Verifying your data was saved correctly...');
+        setProgress(75);
+        progressWidth.value = withTiming(75, { duration: 300 });
+        console.log('✅ Step 3/4 complete: Filter created (75%)');
+        
+        // Step 4: Trigger onboarding completion (75% → 100%)
+        setCurrentStep('Finalizing your account...');
         console.log('Data save successful! User document created/updated with ID:', currentUser.uid);
         
-        // Mark setup as complete
         isSetupComplete.current = true;
         
-        // Show success message
-        setStatusMessage('Success! Loading your home feed...');
-        console.log('✅ ONBOARDING COMPLETE - HasCompletedOnboarding set to true');
-        console.log('🏠 Triggering context to show main app with tabs...');
+        // Trigger the onboarding context
+        completeOnboarding();
+        console.log('✅ OnboardingContext triggered - waiting for state confirmation');
         
-        // Trigger the onboarding context to notify App.js
-        let hasNavigated = false;
-        setTimeout(() => {
-          completeOnboarding();
-          console.log('✅ OnboardingContext triggered - App.js will now show AppNavigator with tabs');
-          
-          // Mark that we've initiated navigation
-          hasNavigated = true;
-          
-          // Fallback: If still on this screen after 3 seconds, manually navigate
-          setTimeout(() => {
-            // Only navigate if we're still on this screen (context navigation didn't work)
-            const currentRoute = navigation.getState().routes[navigation.getState().index];
-            if (currentRoute.name === 'SettingEverythingUp') {
-              console.log('⏰ Fallback: Context navigation did not work, manually navigating');
-              navigation.reset({
-                index: 0,
-                routes: [{ name: 'App' }],
-              });
-            } else {
-              console.log('✅ Navigation already happened via context - skipping fallback');
-            }
-          }, 3000);
-        }, 1500);
+        // Wait a moment for context to update before setting progress to 100
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        setProgress(100);
+        progressWidth.value = withTiming(100, { duration: 300 });
+        console.log('✅ Step 4/4 complete: Setup finished (100%)');
+        setCurrentStep('All set! Loading your home feed...');
         
       } catch (firestoreError) {
         console.error('Firestore save error:', firestoreError);
-        setStatusMessage('Error saving your data, retrying...');
+        setCurrentStep('Error saving data, retrying...');
         
-        // Wait and retry once more
         await new Promise(resolve => setTimeout(resolve, 1000));
         
         try {
@@ -331,53 +327,40 @@ const SettingEverythingUpScreen = ({ navigation, route }) => {
           await setDoc(userDocRef, userData, { merge: true });
           console.log('Second attempt: User data successfully saved to Firestore with merge!');
           
-          // Create default filter based on user preferences (retry)
-          setStatusMessage('Creating your personalized filter...');
+          setProgress(50);
+          progressWidth.value = withTiming(50, { duration: 300 });
+          
+          setCurrentStep('Creating your personalized filter...');
           try {
             await createDefaultFilterFromPreferences(currentUser.uid, userData);
             console.log('Default filter created successfully on retry!');
-            console.log('✅ FILTER SET SUCCESSFULLY ON RETRY - READY FOR NAVIGATION');
           } catch (filterError) {
             console.error('Error creating default filter on retry:', filterError);
-            // Don't fail the entire setup if filter creation fails
           }
           
-          // Show success message
-          setStatusMessage('Success! Loading your home feed...');
-          console.log('✅ ONBOARDING COMPLETE ON RETRY - HasCompletedOnboarding set to true');
-          console.log('🏠 Triggering context to show main app with tabs...');
+          setProgress(75);
+          progressWidth.value = withTiming(75, { duration: 300 });
           
-          // Trigger onboarding context
-          setTimeout(() => {
-            completeOnboarding();
-            console.log('✅ OnboardingContext triggered - App.js will now show AppNavigator with tabs');
-            
-            // Fallback: If still on this screen after 3 seconds, manually navigate
-            setTimeout(() => {
-              // Only navigate if we're still on this screen (context navigation didn't work)
-              const currentRoute = navigation.getState().routes[navigation.getState().index];
-              if (currentRoute.name === 'SettingEverythingUp') {
-                console.log('⏰ Fallback: Context navigation did not work, manually navigating');
-                navigation.reset({
-                  index: 0,
-                  routes: [{ name: 'App' }],
-                });
-              } else {
-                console.log('✅ Navigation already happened via context - skipping fallback');
-              }
-            }, 3000);
-          }, 1500);
+          setCurrentStep('Finalizing your account...');
+          isSetupComplete.current = true;
+          
+          completeOnboarding();
+          console.log('✅ OnboardingContext triggered on retry - waiting for state confirmation');
+          
+          setProgress(100);
+          progressWidth.value = withTiming(100, { duration: 300 });
+          setCurrentStep('All set! Loading your home feed...');
           
         } catch (retryError) {
           console.error('Even retry failed:', retryError);
           isSetupComplete.current = false;
-          setStatusMessage('Could not save your profile. Please try again.');
+          setCurrentStep('Could not save your profile. Please try again.');
           throw new Error('Failed to save user data after retry: ' + retryError.message);
         }
       }
     } catch (error) {
       console.error('Error setting up user preferences:', error);
-      setStatusMessage('Something went wrong saving your profile.');
+      setCurrentStep('Something went wrong saving your profile.');
       isSetupComplete.current = false;
       throw error;
     }
@@ -396,8 +379,19 @@ const SettingEverythingUpScreen = ({ navigation, route }) => {
           <Spinner size="lg" color="salmon" style={styles.spinner} />
         </Animated.View>
         
+        <Animated.View style={[styles.progressBarWrapper, statusAnimatedStyle]}>
+          <View style={styles.progressBarContainer}>
+            <View style={styles.progressBarBackground}>
+              <Animated.View 
+                style={[styles.progressBarFill, progressAnimatedStyle]} 
+              />
+            </View>
+          </View>
+          <Text style={styles.progressText}>{Math.round(progress)}%</Text>
+        </Animated.View>
+        
         <Animated.View style={[styles.statusContainer, statusAnimatedStyle]}>
-          <Text style={styles.statusText}>{statusMessage}</Text>
+          <Text style={styles.statusText}>{currentStep}</Text>
         </Animated.View>
       </View>
     </View>
@@ -441,6 +435,33 @@ const styles = StyleSheet.create({
     fontSize: width * 0.045,
     color: '#666',
     textAlign: 'center',
+  },
+  progressBarWrapper: {
+    width: '80%',
+    alignItems: 'center',
+    marginBottom: height * 0.04,
+  },
+  progressBarContainer: {
+    width: '100%',
+    marginBottom: height * 0.015,
+  },
+  progressBarBackground: {
+    width: '100%',
+    height: 8,
+    backgroundColor: '#f0f0f0',
+    borderRadius: 4,
+    overflow: 'hidden',
+  },
+  progressBarFill: {
+    height: '100%',
+    backgroundColor: '#FC565B',
+    borderRadius: 4,
+  },
+  progressText: {
+    fontSize: width * 0.05,
+    fontWeight: '700',
+    color: '#FC565B',
+    marginTop: 4,
   }
 });
 
