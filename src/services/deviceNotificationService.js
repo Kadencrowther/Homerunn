@@ -4,21 +4,9 @@ import { db } from '../config/firebase';
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-// Safely import native modules with fallbacks
-let Device = null;
-let Constants = null;
-
-try {
-  Device = require('expo-device');
-} catch (error) {
-  console.warn('⚠️ expo-device not available, using fallbacks');
-}
-
-try {
-  Constants = require('expo-constants').default;
-} catch (error) {
-  console.warn('⚠️ expo-constants not available, using fallbacks');
-}
+// Import native modules
+import * as Device from 'expo-device';
+import Constants from 'expo-constants';
 
 // Configure notification handler
 Notifications.setNotificationHandler({
@@ -99,15 +87,20 @@ class DeviceNotificationService {
    */
   async registerForPushNotifications() {
     try {
-      // Check if on physical device (if Device module is available)
-      if (Device && !Device.isDevice) {
+      // Check if on physical device
+      if (!Device?.isDevice) {
         console.warn('⚠️ Push notifications only work on physical devices');
-        return;
+        return null;
       }
 
-      // Try to get token without projectId first (works in most cases)
-      try {
-        const tokenData = await Notifications.getExpoPushTokenAsync();
+      // Get project ID
+      const projectId = Constants?.expoConfig?.extra?.eas?.projectId || 
+                       Constants?.easConfig?.projectId ||
+                       'c9d6dcde-524c-4058-b8d0-2ba7c32d1219';
+
+      console.log('📱 Getting push token with projectId:', projectId?.substring(0, 8) + '...');
+
+      const tokenData = await Notifications.getExpoPushTokenAsync({ projectId });
         const token = tokenData.data;
         console.log('📱 Device push token:', token);
 
@@ -116,29 +109,10 @@ class DeviceNotificationService {
         console.log('💾 Token saved locally');
 
         return token;
-      } catch (err) {
-        console.log('⚠️ Failed to get token without projectId, trying with projectId...');
-        
-        // Fallback: try with projectId if Constants is available
-        if (Constants) {
-          const projectId = Constants.expoConfig?.extra?.eas?.projectId || Constants.easConfig?.projectId;
-          
-          if (projectId) {
-            const tokenData = await Notifications.getExpoPushTokenAsync({ projectId });
-            const token = tokenData.data;
-            console.log('📱 Device push token (with projectId):', token);
-
-            await AsyncStorage.setItem('@homerunn_pending_notification_token', token);
-            console.log('💾 Token saved locally');
-
-            return token;
-          }
-        }
-        
-        throw err;
-      }
     } catch (error) {
       console.error('❌ Error registering for push notifications:', error);
+      console.error('Error details:', error.message);
+      return null;
     }
   }
 
@@ -177,7 +151,7 @@ class DeviceNotificationService {
         Token: token,
         DeviceId: deviceId,
         Platform: Platform.OS,
-        DeviceName: Device?.deviceName || `${Platform.OS} Device`,
+        DeviceName: Device?.deviceName || `${Platform.OS === 'ios' ? 'iPhone' : 'Android'} Device`,
         ModelName: Device?.modelName || 'Unknown Model',
         AddedAt: new Date(),
         LastUpdatedAt: new Date()
@@ -284,22 +258,12 @@ class DeviceNotificationService {
         console.log('📱 Found pending notification token');
         token = pendingToken;
       } else {
-        // Try without projectId first
-        try {
-          const tokenData = await Notifications.getExpoPushTokenAsync();
-          token = tokenData.data;
-        } catch (err) {
-          // Fallback with projectId if available
-          if (Constants) {
-            const projectId = Constants.expoConfig?.extra?.eas?.projectId || Constants.easConfig?.projectId;
-            if (projectId) {
+        const projectId = Constants?.expoConfig?.extra?.eas?.projectId || 
+                         Constants?.easConfig?.projectId ||
+                         'c9d6dcde-524c-4058-b8d0-2ba7c32d1219';
+        
               const tokenData = await Notifications.getExpoPushTokenAsync({ projectId });
               token = tokenData.data;
-            }
-          } else {
-            throw err;
-          }
-        }
         console.log('📱 Got push token:', token.substring(0, 20) + '...');
       }
 
@@ -323,23 +287,12 @@ class DeviceNotificationService {
         throw new Error('Notification permissions not granted');
       }
 
-      // Try without projectId first
-      let token;
-      try {
-        const tokenData = await Notifications.getExpoPushTokenAsync();
-        token = tokenData.data;
-      } catch (err) {
-        // Fallback with projectId if available
-        if (Constants) {
-          const projectId = Constants.expoConfig?.extra?.eas?.projectId || Constants.easConfig?.projectId;
-          if (projectId) {
+      const projectId = Constants?.expoConfig?.extra?.eas?.projectId || 
+                       Constants?.easConfig?.projectId ||
+                       'c9d6dcde-524c-4058-b8d0-2ba7c32d1219';
+      
             const tokenData = await Notifications.getExpoPushTokenAsync({ projectId });
-            token = tokenData.data;
-          }
-        } else {
-          throw err;
-        }
-      }
+      const token = tokenData.data;
       
       console.log('📱 Got push token for enabling:', token.substring(0, 20) + '...');
 
@@ -506,22 +459,14 @@ class DeviceNotificationService {
       let appNotificationsEnabled = false;
 
       try {
-        // Try without projectId first
-        try {
-          const token = await Notifications.getExpoPushTokenAsync();
-          pushToken = token.data;
-        } catch (err) {
-          // Fallback with projectId if available
-          if (Constants) {
-            const projectId = Constants.expoConfig?.extra?.eas?.projectId || Constants.easConfig?.projectId;
-            if (projectId) {
+        const projectId = Constants?.expoConfig?.extra?.eas?.projectId || 
+                         Constants?.easConfig?.projectId ||
+                         'c9d6dcde-524c-4058-b8d0-2ba7c32d1219';
+        
               const token = await Notifications.getExpoPushTokenAsync({ projectId });
               pushToken = token.data;
-            }
-          }
-        }
       } catch (error) {
-        console.log('⚠️ Could not get push token:', error);
+        console.log('⚠️ Could not get push token:', error.message);
       }
 
       if (userId) {
@@ -607,11 +552,15 @@ class DeviceNotificationService {
       console.log('🔧 Constants module available:', !!Constants);
 
       try {
-        const token = await Notifications.getExpoPushTokenAsync();
+        const projectId = Constants?.expoConfig?.extra?.eas?.projectId || 
+                         Constants?.easConfig?.projectId ||
+                         'c9d6dcde-524c-4058-b8d0-2ba7c32d1219';
+        
+        const token = await Notifications.getExpoPushTokenAsync({ projectId });
         console.log('🔑 Push token exists:', !!token.data);
         console.log('🔑 Token preview:', token.data.substring(0, 20) + '...');
       } catch (err) {
-        console.log('⚠️ Could not get push token for status report');
+        console.log('⚠️ Could not get push token for status report:', err.message);
       }
 
       console.log('================================');

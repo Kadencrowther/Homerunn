@@ -22,6 +22,9 @@
         "NSLocationAlwaysAndWhenInUseUsageDescription": "This app uses location to find properties near you.",
         "NSCameraUsageDescription": "This app uses camera to take photos of properties.",
         "NSPhotoLibraryUsageDescription": "This app accesses photo library to select images."
+      },
+      "entitlements": {
+        "aps-environment": "production"
       }
     },
     "android": {

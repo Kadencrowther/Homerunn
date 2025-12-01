@@ -3,21 +3,9 @@ import { doc, updateDoc, getDoc } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import * as Notifications from 'expo-notifications';
 
-// Safely import native modules with fallbacks
-let Device = null;
-let Constants = null;
-
-try {
-  Device = require('expo-device');
-} catch (error) {
-  console.warn('⚠️ expo-device not available, using fallbacks');
-}
-
-try {
-  Constants = require('expo-constants').default;
-} catch (error) {
-  console.warn('⚠️ expo-constants not available, using fallbacks');
-}
+// Import native modules
+import * as Device from 'expo-device';
+import Constants from 'expo-constants';
 
 /**
  * EXPO NOTIFICATIONS SERVICE
@@ -41,27 +29,12 @@ Notifications.setNotificationHandler({
  */
 export const getDeviceInfo = async () => {
   try {
-    // Use Device module if available, otherwise use fallbacks
-    if (!Device) {
-      console.warn('⚠️ Device module not available, using fallback values');
-      return {
-        DeviceName: `${Platform.OS} Device`,
-        DeviceModel: 'Unknown Model',
-        DeviceOS: Platform.OS,
-        DeviceOSVersion: String(Platform.Version),
-        DeviceBrand: Platform.OS === 'ios' ? 'Apple' : 'Android',
-        DeviceManufacturer: Platform.OS === 'ios' ? 'Apple' : 'Unknown',
-        IsDevice: true,
-        DeviceType: 'PHONE',
-      };
-    }
-
-    const deviceName = Device.deviceName || `${Platform.OS} Device`;
-    const modelName = Device.modelName || 'Unknown Model';
-    const osName = Device.osName || Platform.OS;
-    const osVersion = Device.osVersion || String(Platform.Version);
-    const brand = Device.brand || (Platform.OS === 'ios' ? 'Apple' : 'Unknown');
-    const manufacturer = Device.manufacturer || brand;
+    const deviceName = Device?.deviceName || `${Platform.OS} Device`;
+    const modelName = Device?.modelName || 'Unknown Model';
+    const osName = Device?.osName || Platform.OS;
+    const osVersion = Device?.osVersion || String(Platform.Version);
+    const brand = Device?.brand || (Platform.OS === 'ios' ? 'Apple' : 'Unknown');
+    const manufacturer = Device?.manufacturer || brand;
     
     return {
       DeviceName: deviceName,
@@ -70,9 +43,9 @@ export const getDeviceInfo = async () => {
       DeviceOSVersion: osVersion,
       DeviceBrand: brand,
       DeviceManufacturer: manufacturer,
-      IsDevice: Device.isDevice,
-      DeviceType: Device.deviceType === Device.DeviceType.PHONE ? 'PHONE' : 
-                  Device.deviceType === Device.DeviceType.TABLET ? 'TABLET' : 'UNKNOWN',
+      IsDevice: Device?.isDevice ?? true,
+      DeviceType: Device?.deviceType === Device?.DeviceType?.PHONE ? 'PHONE' : 
+                  Device?.deviceType === Device?.DeviceType?.TABLET ? 'TABLET' : 'PHONE',
     };
   } catch (error) {
     console.error('Error getting device info:', error);
@@ -97,13 +70,12 @@ export const registerForPushNotifications = async () => {
   console.log('🔔 Requesting notification permissions...');
   
   try {
-    // Check if running on a real device (if Device module is available)
-    if (Device && !Device.isDevice) {
+    // Check if running on a real device
+    if (!Device?.isDevice) {
       console.warn('⚠️ Push notifications only work on physical devices, not simulators');
-      // Still return a mock token for testing UI
       return {
-        status: 'granted',
-        token: `SimulatorToken_${Platform.OS}_${Date.now()}`,
+        status: 'simulator',
+        token: null,
       };
     }
 
@@ -126,9 +98,18 @@ export const registerForPushNotifications = async () => {
       };
     }
 
-    // Try to get token without projectId first
+    // Get project ID from app.json/eas.json
+    const projectId = Constants?.expoConfig?.extra?.eas?.projectId || 
+                     Constants?.easConfig?.projectId ||
+                     'c9d6dcde-524c-4058-b8d0-2ba7c32d1219'; // Your Homerunn project ID
+
+    console.log('📱 Getting push token with projectId:', projectId?.substring(0, 8) + '...');
+
     try {
-      const tokenData = await Notifications.getExpoPushTokenAsync();
+      const tokenData = await Notifications.getExpoPushTokenAsync({
+        projectId: projectId,
+      });
+      
       const token = tokenData.data;
       console.log('✅ Got Expo Push Token:', token);
 
@@ -136,33 +117,14 @@ export const registerForPushNotifications = async () => {
         status: 'granted',
         token: token,
       };
-    } catch (err) {
-      console.log('⚠️ Failed to get token without projectId, trying with projectId...');
+    } catch (tokenError) {
+      console.error('❌ Failed to get push token:', tokenError.message);
+      console.error('Full error:', tokenError);
       
-      // Fallback: try with projectId if Constants is available
-      if (Constants) {
-        const projectId = Constants.expoConfig?.extra?.eas?.projectId || Constants.easConfig?.projectId;
-        
-        if (projectId) {
-          const tokenData = await Notifications.getExpoPushTokenAsync({
-            projectId: projectId,
-          });
-
-          const token = tokenData.data;
-          console.log('✅ Got Expo Push Token (with projectId):', token);
-
-          return {
-            status: 'granted',
-            token: token,
-          };
-        }
-      }
-      
-      // If we get here, we couldn't get a token
-      console.error('❌ Could not get Expo push token');
       return {
         status: 'error',
         token: null,
+        error: tokenError.message,
       };
     }
   } catch (error) {
