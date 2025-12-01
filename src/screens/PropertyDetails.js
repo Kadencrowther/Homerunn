@@ -7,6 +7,7 @@ import { fetchMLSData } from '../api/fetchMLSData';
 import { LinearGradient } from 'expo-linear-gradient';
 import AuthPromptModal from '../components/AuthPromptModal';
 import { useAuth } from '../context/AuthContext';
+import MapView, { Marker } from 'react-native-maps';
 
 const { width: screenWidth } = Dimensions.get('window');
 
@@ -196,6 +197,10 @@ const PropertyDetails = ({ route, navigation }) => {
       
       // Map utilities
       utilities: Array.isArray(property.Utilities) ? property.Utilities : [],
+      
+      // Map location coordinates
+      latitude: property.Latitude || null,
+      longitude: property.Longitude || null,
       
       // Map school information
       elementarySchool: property.ElementarySchool || '-',
@@ -603,6 +608,40 @@ const PropertyDetails = ({ route, navigation }) => {
             {mappedProperty.description || 'No description available for this property.'}
           </Text>
         </View>
+
+        {/* Location Section */}
+        {mappedProperty.latitude && mappedProperty.longitude && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Location</Text>
+            <View style={styles.mapContainer}>
+              <MapView
+                style={styles.map}
+                initialRegion={{
+                  latitude: mappedProperty.latitude,
+                  longitude: mappedProperty.longitude,
+                  latitudeDelta: 0.05,
+                  longitudeDelta: 0.05,
+                }}
+                scrollEnabled={true}
+                zoomEnabled={true}
+                pitchEnabled={true}
+                rotateEnabled={true}
+              >
+                <Marker
+                  coordinate={{
+                    latitude: mappedProperty.latitude,
+                    longitude: mappedProperty.longitude,
+                  }}
+                  title={mappedProperty.address}
+                >
+                  <View style={styles.markerContainer}>
+                    <View style={styles.markerDot} />
+                  </View>
+                </Marker>
+              </MapView>
+            </View>
+          </View>
+        )}
 
         {/* Property Details Section */}
         <View style={styles.section}>
@@ -1277,6 +1316,37 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 16,
     fontWeight: '600',
+  },
+  mapContainer: {
+    height: 200,
+    borderRadius: 15,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: '#eee',
+  },
+  map: {
+    width: '100%',
+    height: '100%',
+  },
+  markerContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  markerDot: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: '#fc565b',
+    borderWidth: 3,
+    borderColor: '#fff',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.3,
+    shadowRadius: 3,
+    elevation: 5,
   },
 });
 

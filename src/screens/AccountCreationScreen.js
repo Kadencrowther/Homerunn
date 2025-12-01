@@ -210,7 +210,7 @@ const AccountCreationScreen = ({ navigation }) => {
         {isCheckingEmail ? (
           <ActivityIndicator color="#fff" />
         ) : (
-          <Text style={styles.buttonText}>Sign Up</Text>
+        <Text style={styles.buttonText}>Sign Up</Text>
         )}
       </TouchableOpacity>
 

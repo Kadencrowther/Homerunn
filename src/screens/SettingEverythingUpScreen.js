@@ -3,7 +3,6 @@ import {
   View, 
   Text, 
   StyleSheet, 
-  ActivityIndicator,
   Dimensions,
   StatusBar,
   Platform
@@ -22,6 +21,7 @@ import Animated, {
   Easing
 } from 'react-native-reanimated';
 import { createDefaultFilterFromPreferences } from '../utils/createDefaultFilter';
+import Spinner from '../components/Spinner';
 
 const { width, height } = Dimensions.get('window');
 
@@ -393,12 +393,11 @@ const SettingEverythingUpScreen = ({ navigation, route }) => {
         </Animated.View>
         
         <Animated.View style={[styles.loadingContainer, messageAnimatedStyle]}>
-          <ActivityIndicator size="large" color="#fc565b" style={styles.spinner} />
+          <Spinner size="lg" color="salmon" style={styles.spinner} />
         </Animated.View>
         
         <Animated.View style={[styles.statusContainer, statusAnimatedStyle]}>
           <Text style={styles.statusText}>{statusMessage}</Text>
-          <ActivityIndicator size="small" color="#fc565b" style={styles.statusIndicator} />
         </Animated.View>
       </View>
     </View>
@@ -432,7 +431,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   spinner: {
-    transform: [{ scale: 1.5 }],
+    marginBottom: height * 0.02,
   },
   statusContainer: {
     alignItems: 'center',
@@ -441,11 +440,7 @@ const styles = StyleSheet.create({
   statusText: {
     fontSize: width * 0.045,
     color: '#666',
-    marginBottom: height * 0.02,
     textAlign: 'center',
-  },
-  statusIndicator: {
-    marginTop: height * 0.02,
   }
 });
 

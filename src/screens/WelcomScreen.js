@@ -169,7 +169,7 @@ const WelcomeScreen = ({ navigation }) => {
         >
           <View style={styles.emailButtonContent}>
             <Ionicons name="mail" size={width * 0.045} color="#fc565b" />
-            <Text style={styles.emailButtonText}>Continue with Email</Text>
+          <Text style={styles.emailButtonText}>Continue with Email</Text>
           </View>
         </TouchableOpacity>
 

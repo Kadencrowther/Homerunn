@@ -1519,7 +1519,7 @@ const ProfileScreen = ({ navigation }) => {
         </Modal>
 
         {/* App Version */}
-        <Text style={styles.versionText}>Version {Constants.expoConfig?.version || '3.1.2'} ({Constants.expoConfig?.ios?.buildNumber || '3'})</Text>
+        <Text style={styles.versionText}>Version {Constants.expoConfig?.version || '3.1.3'} ({Constants.expoConfig?.ios?.buildNumber || '1'})</Text>
       </ScrollView>
     </SafeAreaView>
   );
