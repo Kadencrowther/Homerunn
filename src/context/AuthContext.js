@@ -49,16 +49,16 @@ export const AuthProvider = ({ children }) => {
       if (!userDoc.exists()) {
         // Create new user document
         await setDoc(userDocRef, {
-          email: user.email || credential.email || '',
-          displayName: credential.fullName ? 
+          Email: user.email || credential.email || '',
+          DisplayName: credential.fullName ? 
             `${credential.fullName.givenName || ''} ${credential.fullName.familyName || ''}`.trim() : 
             user.displayName || '',
           IsActive: true,
           HasCompletedOnboarding: false,
           NotificationsEnabled: false,
           NotificationDevices: [],
-          createdAt: new Date().toISOString(),
-          authProvider: 'apple',
+          CreatedAt: new Date().toISOString(),
+          AuthProvider: 'apple',
         });
       } else {
         // Update existing user to set IsActive
