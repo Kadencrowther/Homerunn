@@ -250,16 +250,95 @@ class NotificationsService {
     try {
       console.log('✅ Marking notification as read:', notificationId);
 
+      // Get the notification to check if it was already read
       const notificationRef = doc(db, 'Users', userId, 'Notifications', notificationId);
+      const notificationDoc = await getDoc(notificationRef);
+      
+      if (!notificationDoc.exists()) {
+        console.log('⚠️ Notification does not exist');
+        return;
+      }
+
+      const notificationData = notificationDoc.data();
+      const wasAlreadyRead = notificationData.IsRead || false;
+
+      // Update notification to mark as read
       await setDoc(notificationRef, {
         IsRead: true,
         ReadAt: serverTimestamp()
       }, { merge: true });
 
       console.log('✅ Notification marked as read');
+
+      // If it wasn't already read, decrement the unread count
+      if (!wasAlreadyRead) {
+        console.log('📉 Decrementing unread count');
+        await this.decrementUnreadCount(userId);
+      } else {
+        console.log('⏭️ Notification was already read, not decrementing count');
+      }
     } catch (error) {
       console.error('Error marking notification as read:', error);
       throw new Error('Failed to mark notification as read');
+    }
+  }
+
+  /**
+   * Decrement unread notification count
+   */
+  async decrementUnreadCount(userId) {
+    try {
+      const userRef = doc(db, 'Users', userId);
+      const userDoc = await getDoc(userRef);
+
+      if (!userDoc.exists()) {
+        console.log('User document does not exist');
+        return 0;
+      }
+
+      const currentCount = userDoc.data().UnreadNotificationsCount || 0;
+      const newCount = Math.max(0, currentCount - 1); // Ensure it doesn't go below 0
+
+      await setDoc(userRef, {
+        UnreadNotificationsCount: newCount,
+        UpdatedAt: serverTimestamp()
+      }, { merge: true });
+
+      console.log('✅ Unread count decremented to:', newCount);
+      return newCount;
+    } catch (error) {
+      console.error('Error decrementing unread count:', error);
+      throw new Error('Failed to decrement unread count');
+    }
+  }
+
+  /**
+   * Recalculate and fix the unread count based on actual unread notifications
+   * Call this if the count gets out of sync
+   */
+  async recalculateUnreadCount(userId) {
+    try {
+      console.log('🔧 Recalculating unread count for user:', userId);
+
+      const notificationsRef = collection(db, 'Users', userId, 'Notifications');
+      const unreadQuery = query(notificationsRef, where('IsRead', '==', false));
+      const unreadSnapshot = await getDocs(unreadQuery);
+
+      const actualUnreadCount = unreadSnapshot.size;
+      console.log('🔧 Actual unread notifications:', actualUnreadCount);
+
+      // Update the user's UnreadNotificationsCount
+      const userRef = doc(db, 'Users', userId);
+      await setDoc(userRef, {
+        UnreadNotificationsCount: actualUnreadCount,
+        UpdatedAt: serverTimestamp()
+      }, { merge: true });
+
+      console.log('✅ Unread count recalculated and fixed to:', actualUnreadCount);
+      return actualUnreadCount;
+    } catch (error) {
+      console.error('Error recalculating unread count:', error);
+      throw new Error('Failed to recalculate unread count');
     }
   }
 

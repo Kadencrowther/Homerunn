@@ -44,7 +44,43 @@ service cloud.firestore {
       
       // Allow access to HotDecks subcollection
       match /HotDecks/{hotDeckId} {
+        // Agents have full read/write access to their own hotdecks
         allow read, write: if request.auth != null && request.auth.uid == userId;
+        
+        // Clients can read hotdecks shared with them
+        allow read: if request.auth != null && 
+                    resource.data.ClientId == request.auth.uid;
+        
+        // Clients can update only their activity fields (ClientActivity, LastViewedAt, LastActivityAt)
+        allow update: if request.auth != null && 
+                      resource.data.ClientId == request.auth.uid &&
+                      request.resource.data.diff(resource.data).affectedKeys()
+                        .hasOnly(['ClientActivity', 'LastViewedAt', 'LastActivityAt']);
+        
+        // Subcollections for tracking swipe details
+        match /DislikedProperties/{propertyId} {
+          // Agent (owner) has full access
+          allow read, write: if request.auth != null && request.auth.uid == userId;
+          // Client can create/update their own swipe records
+          allow create, update: if request.auth != null && 
+                                 request.resource.data.ClientId == request.auth.uid;
+        }
+        
+        match /LikedProperties/{propertyId} {
+          // Agent (owner) has full access
+          allow read, write: if request.auth != null && request.auth.uid == userId;
+          // Client can create/update their own swipe records
+          allow create, update: if request.auth != null && 
+                                 request.resource.data.ClientId == request.auth.uid;
+        }
+        
+        match /LovedProperties/{propertyId} {
+          // Agent (owner) has full access
+          allow read, write: if request.auth != null && request.auth.uid == userId;
+          // Client can create/update their own swipe records
+          allow create, update: if request.auth != null && 
+                                 request.resource.data.ClientId == request.auth.uid;
+        }
       }
       
       // Allow access to Deals subcollection - FULL CRUD access

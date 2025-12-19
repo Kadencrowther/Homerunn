@@ -4,6 +4,7 @@ import { createStackNavigator } from '@react-navigation/stack';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { OnboardingProvider, useOnboarding } from './context/OnboardingContext';
 import { SavedPropertiesProvider } from './context/SavedPropertiesContext';
+import { NotificationProvider } from './context/NotificationProvider';
 import { PropertyProvider } from './contexts/PropertyContext';
 import SetupNavigator from './navigation/SetupNavigator';
 import AppNavigator from './navigation/AppNavigator';
@@ -306,9 +307,11 @@ const App = () => {
     <PropertyProvider>
       <AuthProvider>
         <OnboardingProvider>
-          <SavedPropertiesProvider>
-            <NavigationWrapper />
-          </SavedPropertiesProvider>
+          <NotificationProvider>
+            <SavedPropertiesProvider>
+              <NavigationWrapper />
+            </SavedPropertiesProvider>
+          </NotificationProvider>
         </OnboardingProvider>
       </AuthProvider>
     </PropertyProvider>

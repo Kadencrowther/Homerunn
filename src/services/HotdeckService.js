@@ -1,4 +1,6 @@
-import { auth } from '../config/firebase';
+import { auth, db } from '../config/firebase';
+import { doc, updateDoc, increment, serverTimestamp, getDoc, setDoc, collection, getDocs, query, orderBy, limit } from 'firebase/firestore';
+import { sanitizePropertyId } from '../utils/propertyHelpers';
 
 const API_BASE_URL = 'https://hotdecks-api-1006467951298.us-central1.run.app/v1';
 
@@ -149,3 +151,264 @@ export const trackPropertyActivity = async (deckId, propertyId, action) => {
     throw error;
   }
 };
+
+/**
+ * Get the initial ClientActivity structure for a new hotdeck
+ * Use this when creating a new hotdeck to initialize tracking
+ * @returns {Object} - Initial ClientActivity structure
+ */
+export const getInitialClientActivity = () => {
+  return {
+    TotalViewed: 0,
+    TotalSwipes: 0,
+    LeftSwipes: 0,
+    RightSwipes: 0,
+    UpSwipes: 0,
+    LastActivityAt: null
+  };
+};
+
+/**
+ * Track when a property is viewed in a hotdeck (appears as top card)
+ * Only updates the summary count in the main hotdeck document
+ * @param {string} userId - The client user ID
+ * @param {string} agentId - The agent's ID
+ * @param {string} deckId - The hotdeck ID
+ * @param {string} propertyId - The property ID that was viewed
+ * @returns {Promise<void>}
+ */
+export const trackHotdeckPropertyView = async (userId, agentId, deckId, propertyId) => {
+  try {
+    if (!userId || !agentId || !deckId || !propertyId) {
+      console.error('Missing required parameters for trackHotdeckPropertyView');
+      return;
+    }
+
+    const deckRef = doc(db, 'AgentUsers', agentId, 'HotDecks', deckId);
+    
+    // Check if document exists first
+    const deckDoc = await getDoc(deckRef);
+    if (!deckDoc.exists()) {
+      console.error('Hotdeck document does not exist');
+      return;
+    }
+
+    // Only update summary counts in main document
+    const updates = {
+      'ClientActivity.TotalViewed': increment(1),
+      'ClientActivity.LastActivityAt': serverTimestamp(),
+      LastViewedAt: serverTimestamp()
+    };
+    
+    await updateDoc(deckRef, updates);
+    console.log(`✅ Tracked view for property ${propertyId} in hotdeck ${deckId}`);
+  } catch (error) {
+    console.error('❌ Error tracking hotdeck property view:', error);
+    // Don't throw - tracking shouldn't break the UI
+  }
+};
+
+/**
+ * Track when a property is swiped in a hotdeck
+ * Updates summary counts in main document AND stores full details in subcollections
+ * @param {string} userId - The client user ID
+ * @param {string} agentId - The agent's ID
+ * @param {string} deckId - The hotdeck ID
+ * @param {string} propertyId - The property ID that was swiped
+ * @param {string} direction - Swipe direction: 'left', 'right', or 'top'
+ * @param {Object} propertyDetails - Optional: full property details to store
+ * @returns {Promise<void>}
+ */
+export const trackHotdeckSwipe = async (userId, agentId, deckId, propertyId, direction, propertyDetails = null) => {
+  try {
+    if (!userId || !agentId || !deckId || !propertyId || !direction) {
+      console.error('Missing required parameters for trackHotdeckSwipe');
+      return;
+    }
+
+    // Sanitize property ID for subcollection document ID
+    const sanitizedId = sanitizePropertyId(propertyId);
+
+    // 1. Update summary counts in the main hotdeck document
+    const deckRef = doc(db, 'AgentUsers', agentId, 'HotDecks', deckId);
+    
+    const hotdeckUpdates = {
+      'ClientActivity.TotalSwipes': increment(1),
+      'ClientActivity.LastActivityAt': serverTimestamp()
+    };
+    
+    // Increment direction-specific counter
+    if (direction === 'left') {
+      hotdeckUpdates['ClientActivity.LeftSwipes'] = increment(1);
+    } else if (direction === 'right') {
+      hotdeckUpdates['ClientActivity.RightSwipes'] = increment(1);
+    } else if (direction === 'top') {
+      hotdeckUpdates['ClientActivity.UpSwipes'] = increment(1);
+    }
+    
+    await updateDoc(deckRef, hotdeckUpdates);
+    console.log(`✅ Updated summary counts: ${direction} swipe in hotdeck ${deckId}`);
+    
+    // 2. Store full property details in appropriate subcollection
+    let subcollectionName;
+    if (direction === 'left') {
+      subcollectionName = 'DislikedProperties';
+    } else if (direction === 'right') {
+      subcollectionName = 'LikedProperties';
+    } else if (direction === 'top') {
+      subcollectionName = 'LovedProperties';
+    }
+    
+    if (subcollectionName) {
+      const propertyRef = doc(db, 'AgentUsers', agentId, 'HotDecks', deckId, subcollectionName, sanitizedId);
+      
+      const propertyData = {
+        PropertyId: sanitizedId,
+        OriginalId: propertyId,
+        SwipedAt: serverTimestamp(),
+        ClientId: userId
+      };
+      
+      // Add property details if provided (for quick display without additional API calls)
+      if (propertyDetails) {
+        propertyData.Address = propertyDetails.address || '';
+        propertyData.Price = propertyDetails.price || 0;
+        propertyData.Beds = propertyDetails.beds || 0;
+        propertyData.Baths = propertyDetails.baths || 0;
+        propertyData.Sqft = propertyDetails.sqft || 0;
+        propertyData.Images = propertyDetails.images ? propertyDetails.images.slice(0, 3) : []; // Store up to 3 image URLs
+        propertyData.ListingStatus = propertyDetails.listingStatus || 'Active';
+      }
+      
+      await setDoc(propertyRef, propertyData);
+      console.log(`✅ Stored property details in ${subcollectionName}/${sanitizedId}`);
+    }
+    
+    // 3. Update user's global SwipeCount
+    const swipeCountRef = doc(db, 'Users', userId, 'SwipeCount', 'Current');
+    const swipeCountDoc = await getDoc(swipeCountRef);
+    
+    let swipeCount = {};
+    if (swipeCountDoc.exists()) {
+      swipeCount = swipeCountDoc.data();
+    } else {
+      swipeCount = {
+        LeftSwipes: 0,
+        RightSwipes: 0,
+        UpSwipes: 0,
+        TotalSwipes: 0,
+        HomeSwipes: 0,
+        HotdeckSwipes: 0,
+        LastUpdated: new Date()
+      };
+    }
+    
+    // Update counts
+    if (direction === 'left') {
+      swipeCount.LeftSwipes = (swipeCount.LeftSwipes || 0) + 1;
+    } else if (direction === 'right') {
+      swipeCount.RightSwipes = (swipeCount.RightSwipes || 0) + 1;
+    } else if (direction === 'top') {
+      swipeCount.UpSwipes = (swipeCount.UpSwipes || 0) + 1;
+    }
+    
+    swipeCount.TotalSwipes = (swipeCount.TotalSwipes || 0) + 1;
+    swipeCount.HotdeckSwipes = (swipeCount.HotdeckSwipes || 0) + 1;
+    swipeCount.LastUpdated = new Date();
+    
+    await setDoc(swipeCountRef, swipeCount);
+    console.log(`✅ Updated global swipe count: ${swipeCount.TotalSwipes} total (${swipeCount.HotdeckSwipes} from hotdecks)`);
+    
+    // 4. Optionally update UserMatchMetric if we have property metric
+    if (propertyDetails && propertyDetails.propertyMatchMetric) {
+      try {
+        const { updateUserMatchMetric } = require('../utils/UserMatchMetric');
+        await updateUserMatchMetric(userId, propertyId, propertyDetails.propertyMatchMetric, direction);
+        console.log(`✅ Updated user match metric for hotdeck swipe`);
+      } catch (metricError) {
+        console.error('❌ Error updating user match metric:', metricError);
+        // Continue - match metric update is optional
+      }
+    }
+    
+  } catch (error) {
+    console.error('❌ Error tracking hotdeck swipe:', error);
+    // Don't throw - tracking shouldn't break the UI
+  }
+};
+
+/**
+ * Get all liked properties from a hotdeck
+ * @param {string} agentId - The agent's ID
+ * @param {string} deckId - The hotdeck ID
+ * @param {number} limitCount - Optional: limit results (default: all)
+ * @returns {Promise<Array>} - Array of liked properties
+ */
+export const getHotdeckLikedProperties = async (agentId, deckId, limitCount = null) => {
+  try {
+    const likedRef = collection(db, 'AgentUsers', agentId, 'HotDecks', deckId, 'LikedProperties');
+    const likedQuery = limitCount 
+      ? query(likedRef, orderBy('SwipedAt', 'desc'), limit(limitCount))
+      : query(likedRef, orderBy('SwipedAt', 'desc'));
+    
+    const snapshot = await getDocs(likedQuery);
+    const properties = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    
+    console.log(`✅ Retrieved ${properties.length} liked properties from hotdeck ${deckId}`);
+    return properties;
+  } catch (error) {
+    console.error('❌ Error getting liked properties:', error);
+    return [];
+  }
+};
+
+/**
+ * Get all loved properties from a hotdeck
+ * @param {string} agentId - The agent's ID
+ * @param {string} deckId - The hotdeck ID
+ * @param {number} limitCount - Optional: limit results (default: all)
+ * @returns {Promise<Array>} - Array of loved properties
+ */
+export const getHotdeckLovedProperties = async (agentId, deckId, limitCount = null) => {
+  try {
+    const lovedRef = collection(db, 'AgentUsers', agentId, 'HotDecks', deckId, 'LovedProperties');
+    const lovedQuery = limitCount 
+      ? query(lovedRef, orderBy('SwipedAt', 'desc'), limit(limitCount))
+      : query(lovedRef, orderBy('SwipedAt', 'desc'));
+    
+    const snapshot = await getDocs(lovedQuery);
+    const properties = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    
+    console.log(`✅ Retrieved ${properties.length} loved properties from hotdeck ${deckId}`);
+    return properties;
+  } catch (error) {
+    console.error('❌ Error getting loved properties:', error);
+    return [];
+  }
+};
+
+/**
+ * Get all disliked properties from a hotdeck
+ * @param {string} agentId - The agent's ID
+ * @param {string} deckId - The hotdeck ID
+ * @param {number} limitCount - Optional: limit results (default: all)
+ * @returns {Promise<Array>} - Array of disliked properties
+ */
+export const getHotdeckDislikedProperties = async (agentId, deckId, limitCount = null) => {
+  try {
+    const dislikedRef = collection(db, 'AgentUsers', agentId, 'HotDecks', deckId, 'DislikedProperties');
+    const dislikedQuery = limitCount 
+      ? query(dislikedRef, orderBy('SwipedAt', 'desc'), limit(limitCount))
+      : query(dislikedRef, orderBy('SwipedAt', 'desc'));
+    
+    const snapshot = await getDocs(dislikedQuery);
+    const properties = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    
+    console.log(`✅ Retrieved ${properties.length} disliked properties from hotdeck ${deckId}`);
+    return properties;
+  } catch (error) {
+    console.error('❌ Error getting disliked properties:', error);
+    return [];
+  }
+};
+

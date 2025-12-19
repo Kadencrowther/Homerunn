@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { deviceNotificationService } from '../services/deviceNotificationService';
 import { notificationsService } from '../services/notificationsService';
+import { hotdeckNotificationService } from '../services/HotdeckNotificationService';
 import { auth } from '../config/firebase';
 
 const NotificationContext = createContext(undefined);
@@ -100,7 +101,11 @@ export const NotificationProvider = ({ children }) => {
       window.debugNotifications = debugNotifications;
       window.testNotificationDelivery = testDelivery;
       window.syncBadgeCount = syncBadgeCount;
-      console.log('🐛 Debug functions available: debugNotifications(), testNotificationDelivery(), syncBadgeCount()');
+      window.resetHotdeckTimestamp = () => {
+        hotdeckNotificationService.resetTimestamp();
+        console.log('✅ Hotdeck timestamp reset - next hotdeck will trigger notification');
+      };
+      console.log('🐛 Debug functions available: debugNotifications(), testNotificationDelivery(), syncBadgeCount(), resetHotdeckTimestamp()');
     }
   }, []);
 
@@ -115,9 +120,23 @@ export const NotificationProvider = ({ children }) => {
       return;
     }
 
-    // Update device token on sign in
+    console.log('🔔 NotificationProvider: User signed in:', user.uid);
+
+    // Update device token on sign in (skip on simulator)
     const setupNotifications = async () => {
-      await deviceNotificationService.updateDeviceTokenOnSignIn(user.uid);
+      try {
+        await deviceNotificationService.updateDeviceTokenOnSignIn(user.uid);
+      } catch (error) {
+        console.log('⚠️ Push notifications not available (simulator?), continuing anyway');
+      }
+      
+      // Recalculate unread count to fix any sync issues
+      try {
+        console.log('🔧 Recalculating unread count on app start...');
+        await notificationsService.recalculateUnreadCount(user.uid);
+      } catch (error) {
+        console.error('⚠️ Error recalculating unread count:', error);
+      }
       
       // Sync badge count after a short delay
       setTimeout(() => {
@@ -133,7 +152,7 @@ export const NotificationProvider = ({ children }) => {
       (count) => {
         console.log('📊 Unread count updated:', count);
         setUnreadCount(count);
-        deviceNotificationService.syncBadgeWithTotalUnread(count);
+        deviceNotificationService.syncBadgeWithTotalUnread(count).catch(() => {});
       },
       (error) => {
         console.error('❌ Error in unread count subscription:', error);
@@ -154,10 +173,27 @@ export const NotificationProvider = ({ children }) => {
       }
     );
 
+    // Start hotdeck notification listener (ALWAYS, even without push notifications)
+    let unsubscribeHotdecks = null;
+    console.log('🔔 Starting hotdeck notification listener...');
+    hotdeckNotificationService.startListening(user.uid)
+      .then(unsub => {
+        unsubscribeHotdecks = unsub;
+        console.log('✅ Hotdeck notification listener started successfully');
+      })
+      .catch(error => {
+        console.error('❌ Error starting hotdeck listener:', error);
+      });
+
     // Clean up subscriptions
     return () => {
+      console.log('🛑 Cleaning up notification subscriptions');
       unsubscribeUnreadCount();
       unsubscribeNotifications();
+      if (unsubscribeHotdecks) {
+        unsubscribeHotdecks();
+      }
+      hotdeckNotificationService.stopListening();
     };
   }, [auth.currentUser?.uid]);
 

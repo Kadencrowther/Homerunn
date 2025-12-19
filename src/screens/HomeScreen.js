@@ -9,6 +9,7 @@ import { FontAwesome } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import FilterModal from '../components/FilterModal';
 import { useSavedProperties } from '../context/SavedPropertiesContext';
+import { useNotifications } from '../context/NotificationProvider';
 import { formatPrice } from '../utils/formatters';
 import SwipeTutorial from '../components/SwipeTutorial';
 import { auth, db } from '../config/firebase';
@@ -38,6 +39,7 @@ const CARD_HEIGHT = height - HEADER_HEIGHT - TAB_BAR_HEIGHT - (CARD_MARGIN * 2) 
 const HomeScreen = () => {
   const navigation = useNavigation();
   const { isGuest } = useAuth();
+  const { notifications, unreadCount } = useNotifications();
 
   // Add this function to determine badge color based on status
   const getStatusColor = (status) => {
@@ -1423,8 +1425,34 @@ const HomeScreen = () => {
               color={(isUndoInProgress || cardCategories.passedCards.length === 0) ? '#ccc' : 'black'} 
             />
           </TouchableOpacity>
-          <TouchableOpacity style={styles.bellButton} onPress={() => setShowNotificationDropdown(!showNotificationDropdown)}>
+          <TouchableOpacity 
+            style={styles.bellButton} 
+            onPress={() => {
+              console.log('🔔 Bell icon pressed!');
+              console.log('📊 Total notifications:', notifications.length);
+              console.log('📊 Unread count FROM CONTEXT:', unreadCount);
+              console.log('📋 All notifications:', JSON.stringify(notifications, null, 2));
+              
+              // Filter for hotdeck notifications
+              const hotdeckNotifications = notifications.filter(n => n.type === 'hotdeck_received');
+              console.log('🏠 Hotdeck notifications:', hotdeckNotifications.length);
+              console.log('🏠 Hotdeck details:', JSON.stringify(hotdeckNotifications, null, 2));
+              
+              // Count unread notifications
+              const unreadNotifications = notifications.filter(n => !n.isRead);
+              console.log('📊 UNREAD notifications count (calculated):', unreadNotifications.length);
+              console.log('📊 UNREAD notifications:', unreadNotifications.map(n => ({ id: n.id, title: n.title, isRead: n.isRead })));
+              
+              // Toggle notification dropdown
+              setShowNotificationDropdown(!showNotificationDropdown);
+            }}
+          >
             <FontAwesome name="bell-o" size={20} color="black" />
+            {unreadCount > 0 && (
+              <View style={styles.notificationBadge}>
+                <Text style={styles.notificationBadgeText}>{unreadCount}</Text>
+              </View>
+            )}
           </TouchableOpacity>
           <TouchableOpacity onPress={() => setIsFilterModalVisible(true)} style={styles.filterButton}>
             <Ionicons name="filter" size={24} color="black" />
@@ -1735,7 +1763,7 @@ const HomeScreen = () => {
       <NotificationDropdown
         visible={showNotificationDropdown}
         onClose={() => setShowNotificationDropdown(false)}
-        notifications={[]} // Empty array for now - will be populated with real notifications later
+        notifications={notifications}
       />
 
       {/* Auth Prompt Modal */}
@@ -1789,7 +1817,25 @@ const styles = StyleSheet.create({
     marginRight: 8
   },
   bellButton: {
-    marginHorizontal: 6
+    marginHorizontal: 6,
+    position: 'relative',
+  },
+  notificationBadge: {
+    position: 'absolute',
+    top: -5,
+    right: -5,
+    backgroundColor: '#fc565b',
+    borderRadius: 10,
+    minWidth: 18,
+    height: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+  },
+  notificationBadgeText: {
+    color: 'white',
+    fontSize: 10,
+    fontWeight: 'bold',
   },
   redoButton: {
     marginHorizontal: 6

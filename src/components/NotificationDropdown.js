@@ -5,16 +5,62 @@ import {
   StyleSheet,
   TouchableOpacity,
   Dimensions,
-  Animated
+  Animated,
+  ScrollView
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useNavigation } from '@react-navigation/native';
+import { notificationsService } from '../services/notificationsService';
+import { auth } from '../config/firebase';
 
 const { width, height } = Dimensions.get('window');
 
 const NotificationDropdown = ({ visible, onClose, notifications = [] }) => {
-  // Removed render log
+  const navigation = useNavigation();
   
   if (!visible) return null;
+
+  const handleNotificationPress = async (notification) => {
+    console.log('🔔 Notification tapped:', notification);
+    
+    // Mark as read
+    try {
+      const userId = auth.currentUser?.uid;
+      if (userId) {
+        await notificationsService.MarkNotificationAsRead(userId, notification.id);
+        console.log('✅ Notification marked as read');
+      }
+    } catch (error) {
+      console.error('❌ Error marking notification as read:', error);
+    }
+
+    // Close dropdown
+    onClose();
+
+    // Navigate based on type
+    if (notification.type === 'hotdeck_received' && notification.data?.hotdeckId) {
+      navigation.navigate('HotdeckView', {
+        hotdeckId: notification.data.hotdeckId,
+        agentId: notification.data.agentId,
+      });
+    }
+  };
+
+  const formatTimeAgo = (timestamp) => {
+    if (!timestamp) return '';
+    const date = new Date(timestamp);
+    const now = new Date();
+    const diff = now - date;
+    const minutes = Math.floor(diff / 60000);
+    const hours = Math.floor(diff / 3600000);
+    const days = Math.floor(diff / 86400000);
+    
+    if (minutes < 1) return 'Just now';
+    if (minutes < 60) return `${minutes}m ago`;
+    if (hours < 24) return `${hours}h ago`;
+    if (days < 7) return `${days}d ago`;
+    return date.toLocaleDateString();
+  };
   
   return (
     <TouchableOpacity
@@ -30,8 +76,12 @@ const NotificationDropdown = ({ visible, onClose, notifications = [] }) => {
           </TouchableOpacity>
         </View>
         
-        {/* Content area with explicit height */}
-        <View style={styles.contentArea}>
+        {/* Content area with ScrollView */}
+        <ScrollView 
+          style={styles.contentArea}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={true}
+        >
           {notifications.length === 0 ? (
             <View style={styles.emptyState}>
               <Ionicons name="notifications-off-outline" size={48} color="#ccc" />
@@ -41,27 +91,43 @@ const NotificationDropdown = ({ visible, onClose, notifications = [] }) => {
               </Text>
             </View>
           ) : (
-            notifications.map((notification, index) => (
+            notifications.map((notification) => (
               <TouchableOpacity
-                key={index}
-                style={styles.notificationItem}
-                onPress={() => {
-                  // Handle notification tap - will be implemented later
-                  console.log('Notification tapped:', notification);
-                }}
+                key={notification.id}
+                style={[styles.notificationItem, !notification.isRead && styles.unreadItem]}
+                onPress={() => handleNotificationPress(notification)}
+                activeOpacity={0.7}
               >
                 <View style={styles.notificationIcon}>
-                  <Ionicons name="home-outline" size={20} color="#fc565b" />
+                  <Ionicons 
+                    name={notification.type === 'hotdeck_received' ? 'home' : 'notifications'} 
+                    size={18} 
+                    color="#fc565b" 
+                  />
                 </View>
                 <View style={styles.notificationContent}>
-                  <Text style={styles.notificationTitle}>{notification.title}</Text>
-                  <Text style={styles.notificationMessage}>{notification.message}</Text>
-                  <Text style={styles.notificationTime}>{notification.time}</Text>
+                  <Text style={styles.notificationTitle} numberOfLines={1}>
+                    {notification.title}
+                  </Text>
+                  <Text style={styles.notificationMessage} numberOfLines={2}>
+                    {notification.body}
+                  </Text>
+                  {notification.data?.deckName && (
+                    <Text style={styles.deckName} numberOfLines={1}>
+                      📋 {notification.data.deckName}
+                    </Text>
+                  )}
+                  <Text style={styles.notificationTime}>
+                    {formatTimeAgo(notification.createdAt)}
+                  </Text>
                 </View>
+                {!notification.isRead && (
+                  <View style={styles.unreadDot} />
+                )}
               </TouchableOpacity>
             ))
           )}
-        </View>
+        </ScrollView>
       </View>
     </TouchableOpacity>
   );
@@ -112,13 +178,13 @@ const styles = StyleSheet.create({
   },
   notificationsList: {
     flex: 1,
-    minHeight: 300, // Increased from 200 to 300
   },
   emptyState: {
     flex: 1,
     padding: 40,
     alignItems: 'center',
     justifyContent: 'center',
+    minHeight: 300,
   },
   emptyTitle: {
     fontSize: 18,
@@ -135,41 +201,60 @@ const styles = StyleSheet.create({
   },
   notificationItem: {
     flexDirection: 'row',
-    padding: 16,
+    padding: 12,
     borderBottomWidth: 1,
     borderBottomColor: '#f0f0f0',
+    backgroundColor: '#fff',
+    alignItems: 'center',
+  },
+  unreadItem: {
+    backgroundColor: '#fff8f8',
   },
   notificationIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     backgroundColor: '#fff5f5',
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 12,
+    marginRight: 10,
   },
   notificationContent: {
     flex: 1,
   },
   notificationTitle: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '600',
     color: '#333',
-    marginBottom: 4,
+    marginBottom: 2,
   },
   notificationMessage: {
-    fontSize: 14,
+    fontSize: 13,
     color: '#666',
-    marginBottom: 4,
-    lineHeight: 18,
+    marginBottom: 2,
+    lineHeight: 16,
   },
-  notificationTime: {
+  deckName: {
     fontSize: 12,
     color: '#999',
+    marginBottom: 2,
+  },
+  notificationTime: {
+    fontSize: 11,
+    color: '#999',
+  },
+  unreadDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#fc565b',
+    marginLeft: 8,
   },
   contentArea: {
     flex: 1,
-    minHeight: 300, // Ensure content area has a minimum height
+  },
+  scrollContent: {
+    flexGrow: 1,
   },
 });
 

@@ -16,6 +16,7 @@ import GetPrequalified from '../screens/GetPrequalified';
 import MyAgent from '../screens/myagent';
 import HotdeckListScreen from '../screens/HotdeckListScreen';
 import HotdeckViewScreen from '../screens/HotdeckViewScreen';
+import NotificationsListScreen from '../screens/NotificationsListScreen';
 
 const Tab = createBottomTabNavigator();
 const Stack = createStackNavigator();
@@ -44,6 +45,8 @@ const HomeStack = () => {
       <Stack.Screen name="HomeMain" component={HomeScreen} />
       <Stack.Screen name="PropertyImages" component={PropertyImages} />
       <Stack.Screen name="PropertyDetails" component={PropertyDetails} />
+      <Stack.Screen name="NotificationsList" component={NotificationsListScreen} />
+      <Stack.Screen name="HotdeckView" component={HotdeckViewScreen} />
     </Stack.Navigator>
   );
 };

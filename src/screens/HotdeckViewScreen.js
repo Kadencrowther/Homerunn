@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   View, Text, StyleSheet, Image, TouchableOpacity, 
-  Animated, Dimensions, Vibration, Platform, StatusBar 
+  Animated, Dimensions, Vibration, Platform, StatusBar, Easing 
 } from 'react-native';
 import Swiper from 'react-native-deck-swiper';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
@@ -9,11 +9,11 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import { useSavedProperties } from '../context/SavedPropertiesContext';
 import { formatPrice } from '../utils/formatters';
 import { auth } from '../config/firebase';
-import { getHotdeck, markHotdeckAsViewed } from '../services/HotdeckService';
+import { getHotdeck, getHotdeckProperties, markHotdeckAsViewed, trackHotdeckPropertyView, trackHotdeckSwipe } from '../services/HotdeckService';
 import { getAgentUser } from '../services/AgentUserService';
 import { fetchMLSData } from '../api/fetchMLSData';
 import PlaceholderImage from '../components/PlaceholderImage';
-import ShimmerEffect from '../components/ShimmerEffect';
+import { LinearGradient } from 'expo-linear-gradient';
 
 const { width, height } = Dimensions.get('window');
 
@@ -34,12 +34,14 @@ const HotdeckViewScreen = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [swipedCards, setSwipedCards] = useState([]);
+  const [viewedPropertyIds, setViewedPropertyIds] = useState(new Set());
   
   const { addToSaved, removeFromSaved } = useSavedProperties();
   const [overlayOpacity] = useState(new Animated.Value(0));
   const [showHeartOverlay, setShowHeartOverlay] = useState(false);
   const heartScale = useState(new Animated.Value(0))[0];
   const [overlayIcon, setOverlayIcon] = useState(null);
+  const shimmerAnimValue = useRef(new Animated.Value(0)).current;
 
   const getStatusColor = (status) => {
     if (status === 'Active') return '#fc565b';
@@ -52,6 +54,23 @@ const HotdeckViewScreen = () => {
   useEffect(() => {
     loadHotdeck();
   }, [hotdeckId, agentId]);
+
+  useEffect(() => {
+    if (isLoading) {
+      Animated.loop(
+        Animated.timing(shimmerAnimValue, {
+          toValue: 1,
+          duration: 1500,
+          easing: Easing.linear,
+          useNativeDriver: true,
+        })
+      ).start();
+    }
+
+    return () => {
+      shimmerAnimValue.stopAnimation();
+    };
+  }, [isLoading]);
 
   const loadHotdeck = async () => {
     try {
@@ -74,37 +93,60 @@ const HotdeckViewScreen = () => {
       
       let mappedProperties = [];
       
+      // Handle criteria-based hotdeck (dynamic filtering)
       if (hotdeckData.selection_method === 'criteria' && hotdeckData.filter_criteria) {
-        console.log('🔍 Filter-based hotdeck - fetching properties...');
+        console.log('🔍 Filter-based hotdeck - fetching properties with criteria...');
+        console.log('📋 Raw filter_criteria:', hotdeckData.filter_criteria);
+        
+        // Convert beds/baths to include all values from that number upward
+        // If beds = [4], expand to [4, 5, 6, 7, 8, 9, 10] to mean "4 or more"
+        const expandedBeds = hotdeckData.filter_criteria.beds?.length > 0 
+          ? hotdeckData.filter_criteria.beds.flatMap(bed => {
+              const bedNum = parseInt(bed);
+              // Create array from bedNum to 10+ (covers most cases)
+              return bedNum >= 10 ? ['10+'] : Array.from({length: 10 - bedNum + 1}, (_, i) => bedNum + i);
+            })
+          : [];
+        
+        const expandedBaths = hotdeckData.filter_criteria.baths?.length > 0
+          ? hotdeckData.filter_criteria.baths.flatMap(bath => {
+              const bathNum = parseInt(bath);
+              // Create array from bathNum to 10+ (covers most cases)
+              return bathNum >= 10 ? ['10+'] : Array.from({length: 10 - bathNum + 1}, (_, i) => bathNum + i);
+            })
+          : [];
         
         const filters = {
           priceRange: {
-            min: hotdeckData.filter_criteria.PriceRange?.Min || 0,
-            max: hotdeckData.filter_criteria.PriceRange?.Max || 2000000
+            min: hotdeckData.filter_criteria.price_range?.min || 0,
+            max: hotdeckData.filter_criteria.price_range?.max || 2000000
           },
-          beds: hotdeckData.filter_criteria.Beds || [],
-          baths: hotdeckData.filter_criteria.Baths || [],
-          homeType: hotdeckData.filter_criteria.HomeType || [],
+          beds: expandedBeds,
+          baths: expandedBaths,
+          homeType: hotdeckData.filter_criteria.home_type || [],
           sqft: {
-            min: hotdeckData.filter_criteria.Sqft?.Min || 0,
-            max: hotdeckData.filter_criteria.Sqft?.Max || 10000
+            min: hotdeckData.filter_criteria.sqft?.min || 0,
+            max: hotdeckData.filter_criteria.sqft?.max || 10000
           },
           yearBuilt: {
-            min: hotdeckData.filter_criteria.YearBuilt?.Min || 1900,
-            max: hotdeckData.filter_criteria.YearBuilt?.Max || new Date().getFullYear()
+            min: hotdeckData.filter_criteria.year_built?.min || 1900,
+            max: hotdeckData.filter_criteria.year_built?.max || new Date().getFullYear()
           },
-          addressText: hotdeckData.filter_criteria.AddressText || '',
-          mapRegion: hotdeckData.filter_criteria.MapRegion ? {
-            latitude: hotdeckData.filter_criteria.MapRegion.Latitude,
-            longitude: hotdeckData.filter_criteria.MapRegion.Longitude,
-            latitudeDelta: hotdeckData.filter_criteria.MapRegion.LatitudeDelta,
-            longitudeDelta: hotdeckData.filter_criteria.MapRegion.LongitudeDelta
+          addressText: hotdeckData.filter_criteria.address_text || '',
+          mapRegion: hotdeckData.filter_criteria.map_region ? {
+            latitude: hotdeckData.filter_criteria.map_region.latitude,
+            longitude: hotdeckData.filter_criteria.map_region.longitude,
+            latitudeDelta: hotdeckData.filter_criteria.map_region.latitude_delta,
+            longitudeDelta: hotdeckData.filter_criteria.map_region.longitude_delta
           } : null,
-          radiusMiles: hotdeckData.filter_criteria.RadiusMiles || 10
+          radiusMiles: hotdeckData.filter_criteria.radius_miles || 10
         };
+        
+        console.log('🔧 Mapped filters for MLS (beds expanded):', filters);
         
         const result = await fetchMLSData(filters);
         console.log(`✅ Found ${result.properties.length} properties from MLS`);
+
         
         mappedProperties = result.properties.map((item, idx) => {
           let images = [];
@@ -140,9 +182,61 @@ const HotdeckViewScreen = () => {
           };
         });
       }
+      // Handle manual property selection hotdeck
+      else if (hotdeckData.selection_method === 'manual' || hotdeckData.selection_method === 'properties') {
+        console.log('🔍 Manual selection hotdeck - fetching pre-selected properties...');
+        
+        try {
+          const response = await getHotdeckProperties(hotdeckData.id);
+          console.log(`✅ Found ${response.properties?.length || 0} manually selected properties`);
+          
+          if (response.properties && response.properties.length > 0) {
+            mappedProperties = response.properties.map((item, idx) => {
+              let images = [];
+              
+              if (item.Media && Array.isArray(item.Media)) {
+                images = item.Media
+                  .filter(m => m.MediaCategory === 'Photo' && m.MediaURL)
+                  .map(m => ({ uri: m.MediaURL }));
+              }
+              
+              if (images.length === 0) {
+                images.push(require('../../assets/house1.jpeg'));
+              }
+              
+              return {
+                id: item['@odata.id'] || item.ListingId || `property-${idx}`,
+                listingId: item.ListingId || '',
+                mlsNumber: item.ListingId || item.MLSNumber || '',
+                price: item.ListPrice || 0,
+                beds: item.BedroomsTotal || 0,
+                baths: item.BathroomsTotalInteger || 0,
+                sqft: item.LivingArea || 0,
+                address: `${item.StreetNumber || ''} ${item.StreetName || ''}, ${item.City || ''}, ${item.StateOrProvince || ''}`,
+                images: images,
+                yearBuilt: item.YearBuilt ? item.YearBuilt.toString() : 'N/A',
+                lotSize: item.LotSizeSquareFeet || 0,
+                propertyType: item.PropertyType || '',
+                propertySubType: item.PropertySubType || '',
+                daysOnMarket: item.DaysOnMarket || 0,
+                listingStatus: item.StandardStatus || 'Active',
+                description: item.PublicRemarks || '',
+                listingOffice: item.ListingOffice || item.ListOfficeName || 'MLS Listing'
+              };
+            });
+          }
+        } catch (apiError) {
+          console.error('❌ Error fetching hotdeck properties from API:', apiError);
+          // Fall back to empty if API fails
+          mappedProperties = [];
+        }
+      }
+      else {
+        console.warn('⚠️ Unknown selection method:', hotdeckData.selection_method);
+      }
       
       setCurrentDeck(mappedProperties);
-      console.log(`✅ Loaded ${mappedProperties.length} properties`);
+      console.log(`✅ Loaded ${mappedProperties.length} properties into deck`);
       
     } catch (error) {
       console.error('❌ Error loading hotdeck:', error);
@@ -189,12 +283,55 @@ const HotdeckViewScreen = () => {
     }, 800);
   }, [heartScale, overlayOpacity]);
 
+  // Track property views when the current card changes
+  useEffect(() => {
+    if (currentDeck.length > 0 && currentIndex < currentDeck.length) {
+      const currentProperty = currentDeck[currentIndex];
+      const userId = auth.currentUser?.uid;
+      
+      // Only track if not already viewed and we have all required data
+      if (currentProperty && !viewedPropertyIds.has(currentProperty.id) && userId && hotdeckId && agentId) {
+        setViewedPropertyIds(prev => new Set([...prev, currentProperty.id]));
+        
+        // Track the view (fire and forget - don't await)
+        trackHotdeckPropertyView(userId, agentId, hotdeckId, currentProperty.id);
+      }
+    }
+  }, [currentIndex, currentDeck, hotdeckId, agentId, viewedPropertyIds]);
+
   const handleSwipe = useCallback((cardIndex, direction) => {
     const swipedCard = currentDeck[cardIndex];
     if (!swipedCard) return;
 
     setSwipedCards(prev => [...prev, { ...swipedCard, swipeDirection: direction }]);
     setCurrentIndex(cardIndex + 1);
+    
+    // Track the swipe with full property details
+    const userId = auth.currentUser?.uid;
+    if (userId && hotdeckId && agentId) {
+      // Pass property details to store in subcollection
+      const propertyDetails = {
+        address: swipedCard.address,
+        price: swipedCard.price,
+        beds: swipedCard.beds,
+        baths: swipedCard.baths,
+        sqft: swipedCard.sqft,
+        images: swipedCard.images ? swipedCard.images.slice(0, 3).map(img => 
+          typeof img === 'object' ? img.uri : img
+        ) : [],
+        listingStatus: swipedCard.listingStatus,
+        propertyMatchMetric: swipedCard.propertyMatchMetric
+      };
+      
+      trackHotdeckSwipe(
+        userId,
+        agentId,
+        hotdeckId,
+        swipedCard.id,
+        direction,
+        propertyDetails
+      );
+    }
     
     if (direction === 'left') {
       Vibration.vibrate(50);
@@ -206,7 +343,7 @@ const HotdeckViewScreen = () => {
       animateHeart();
       Vibration.vibrate([0, 50, 50, 100]);
     }
-  }, [addToSaved, animateHeart, currentDeck]);
+  }, [addToSaved, animateHeart, currentDeck, hotdeckId, agentId]);
 
   const handleRedo = useCallback(() => {
     if (swipedCards.length === 0) return;
@@ -228,62 +365,196 @@ const HotdeckViewScreen = () => {
   }, [swipedCards, currentIndex, removeFromSaved]);
 
   if (isLoading) {
+    const translateX = shimmerAnimValue.interpolate({
+      inputRange: [0, 1],
+      outputRange: [-width, width]
+    });
+
     return (
       <View style={styles.container}>
-        {/* Header - Exactly like loaded state */}
+        {/* Header - Exactly like HomeScreen */}
         <View style={styles.header}>
           <View style={styles.logoContainer}>
             <Image source={require('../../assets/Homerunnhousecolorlogo.png')} style={styles.logo} />
             <Text style={styles.logoText}>HOMERUNN</Text>
           </View>
           <View style={styles.headerIcons}>
-            <TouchableOpacity 
-              style={[
-                styles.actionButton, 
-                styles.redoButton
-              ]} 
-              disabled={true}
-            >
-              <Ionicons 
-                name="refresh" 
-                size={24} 
-                color="#ccc"
-              />
-            </TouchableOpacity>
+            <View style={[styles.actionButton, styles.redoButton]}>
+              <Ionicons name="refresh" size={24} color="#ccc" />
+            </View>
           </View>
         </View>
 
-        {/* Loading Cards */}
+        {/* Loading Cards with animated shimmer */}
         <View style={styles.swiperContainer}>
           <View style={styles.skeletonCardsContainer}>
             {/* Bottom card */}
             <View style={[styles.skeletonCard, styles.skeletonCardBottom]}>
-              <View style={styles.skeletonImageContainer}>
-                <ShimmerEffect style={{ width: '100%', height: '100%' }} />
-              </View>
-            </View>
-            
-            {/* Middle card */}
-            <View style={[styles.skeletonCard, styles.skeletonCardMiddle]}>
-              <View style={styles.skeletonImageContainer}>
-                <ShimmerEffect style={{ width: '100%', height: '100%' }} />
-              </View>
-            </View>
-            
-            {/* Top card with details */}
-            <View style={[styles.skeletonCard, styles.skeletonCardTop]}>
-              <View style={styles.skeletonImageContainer}>
-                <ShimmerEffect style={{ width: '100%', height: '100%' }} />
-              </View>
-              <View style={styles.skeletonDetails}>
-                <ShimmerEffect style={styles.skeletonPrice} />
-                <View style={styles.skeletonDetailsRow}>
-                  <ShimmerEffect style={styles.skeletonDetailItem} />
-                  <ShimmerEffect style={styles.skeletonDetailItem} />
-                  <ShimmerEffect style={styles.skeletonDetailItem} />
+              <View style={styles.imageContainer}>
+                <View style={styles.imageGrid}>
+                  <View style={styles.cardImage}>
+                    <Animated.View style={[styles.shimmerOverlay, { transform: [{ translateX }] }]}>
+                      <LinearGradient
+                        colors={['transparent', 'rgba(255, 255, 255, 0.3)', 'transparent']}
+                        start={{ x: 0, y: 0.5 }}
+                        end={{ x: 1, y: 0.5 }}
+                        style={styles.shimmerGradient}
+                      />
+                    </Animated.View>
+                  </View>
+                  <View style={styles.cardImage}>
+                    <Animated.View style={[styles.shimmerOverlay, { transform: [{ translateX }] }]}>
+                      <LinearGradient
+                        colors={['transparent', 'rgba(255, 255, 255, 0.3)', 'transparent']}
+                        start={{ x: 0, y: 0.5 }}
+                        end={{ x: 1, y: 0.5 }}
+                        style={styles.shimmerGradient}
+                      />
+                    </Animated.View>
+                  </View>
+                  <View style={styles.cardImage}>
+                    <Animated.View style={[styles.shimmerOverlay, { transform: [{ translateX }] }]}>
+                      <LinearGradient
+                        colors={['transparent', 'rgba(255, 255, 255, 0.3)', 'transparent']}
+                        start={{ x: 0, y: 0.5 }}
+                        end={{ x: 1, y: 0.5 }}
+                        style={styles.shimmerGradient}
+                      />
+                    </Animated.View>
+                  </View>
                 </View>
-                <ShimmerEffect style={styles.skeletonAddress} />
-                <ShimmerEffect style={styles.skeletonYearBuilt} />
+              </View>
+              <View style={styles.cardDetails}>
+                <View style={styles.loadingPrice}>
+                  <Animated.View style={[styles.shimmerOverlay, { transform: [{ translateX }] }]}>
+                    <LinearGradient
+                      colors={['transparent', 'rgba(255, 255, 255, 0.3)', 'transparent']}
+                      start={{ x: 0, y: 0.5 }}
+                      end={{ x: 1, y: 0.5 }}
+                      style={styles.shimmerGradient}
+                    />
+                  </Animated.View>
+                </View>
+                <View style={styles.detailsContainer}>
+                  {[1, 2, 3].map(i => (
+                    <View key={i} style={styles.loadingDetailItem}>
+                      <Animated.View style={[styles.shimmerOverlay, { transform: [{ translateX }] }]}>
+                        <LinearGradient
+                          colors={['transparent', 'rgba(255, 255, 255, 0.3)', 'transparent']}
+                          start={{ x: 0, y: 0.5 }}
+                          end={{ x: 1, y: 0.5 }}
+                          style={styles.shimmerGradient}
+                        />
+                      </Animated.View>
+                    </View>
+                  ))}
+                </View>
+                <View style={styles.loadingAddress}>
+                  <Animated.View style={[styles.shimmerOverlay, { transform: [{ translateX }] }]}>
+                    <LinearGradient
+                      colors={['transparent', 'rgba(255, 255, 255, 0.3)', 'transparent']}
+                      start={{ x: 0, y: 0.5 }}
+                      end={{ x: 1, y: 0.5 }}
+                      style={styles.shimmerGradient}
+                    />
+                  </Animated.View>
+                </View>
+                <View style={styles.loadingYearBuilt}>
+                  <Animated.View style={[styles.shimmerOverlay, { transform: [{ translateX }] }]}>
+                    <LinearGradient
+                      colors={['transparent', 'rgba(255, 255, 255, 0.3)', 'transparent']}
+                      start={{ x: 0, y: 0.5 }}
+                      end={{ x: 1, y: 0.5 }}
+                      style={styles.shimmerGradient}
+                    />
+                  </Animated.View>
+                </View>
+              </View>
+            </View>
+
+            {/* Middle card - same structure */}
+            <View style={[styles.skeletonCard, styles.skeletonCardMiddle]}>
+              <View style={styles.imageContainer}>
+                <View style={styles.imageGrid}>
+                  {[1, 2, 3].map(i => (
+                    <View key={i} style={styles.cardImage}>
+                      <Animated.View style={[styles.shimmerOverlay, { transform: [{ translateX }] }]}>
+                        <LinearGradient
+                          colors={['transparent', 'rgba(255, 255, 255, 0.3)', 'transparent']}
+                          start={{ x: 0, y: 0.5 }}
+                          end={{ x: 1, y: 0.5 }}
+                          style={styles.shimmerGradient}
+                        />
+                      </Animated.View>
+                    </View>
+                  ))}
+                </View>
+              </View>
+            </View>
+
+            {/* Top card - same structure */}
+            <View style={[styles.skeletonCard, styles.skeletonCardTop]}>
+              <View style={styles.imageContainer}>
+                <View style={styles.imageGrid}>
+                  {[1, 2, 3].map(i => (
+                    <View key={i} style={styles.cardImage}>
+                      <Animated.View style={[styles.shimmerOverlay, { transform: [{ translateX }] }]}>
+                        <LinearGradient
+                          colors={['transparent', 'rgba(255, 255, 255, 0.3)', 'transparent']}
+                          start={{ x: 0, y: 0.5 }}
+                          end={{ x: 1, y: 0.5 }}
+                          style={styles.shimmerGradient}
+                        />
+                      </Animated.View>
+                    </View>
+                  ))}
+                </View>
+              </View>
+              <View style={styles.cardDetails}>
+                <View style={styles.loadingPrice}>
+                  <Animated.View style={[styles.shimmerOverlay, { transform: [{ translateX }] }]}>
+                    <LinearGradient
+                      colors={['transparent', 'rgba(255, 255, 255, 0.3)', 'transparent']}
+                      start={{ x: 0, y: 0.5 }}
+                      end={{ x: 1, y: 0.5 }}
+                      style={styles.shimmerGradient}
+                    />
+                  </Animated.View>
+                </View>
+                <View style={styles.detailsContainer}>
+                  {[1, 2, 3].map(i => (
+                    <View key={i} style={styles.loadingDetailItem}>
+                      <Animated.View style={[styles.shimmerOverlay, { transform: [{ translateX }] }]}>
+                        <LinearGradient
+                          colors={['transparent', 'rgba(255, 255, 255, 0.3)', 'transparent']}
+                          start={{ x: 0, y: 0.5 }}
+                          end={{ x: 1, y: 0.5 }}
+                          style={styles.shimmerGradient}
+                        />
+                      </Animated.View>
+                    </View>
+                  ))}
+                </View>
+                <View style={styles.loadingAddress}>
+                  <Animated.View style={[styles.shimmerOverlay, { transform: [{ translateX }] }]}>
+                    <LinearGradient
+                      colors={['transparent', 'rgba(255, 255, 255, 0.3)', 'transparent']}
+                      start={{ x: 0, y: 0.5 }}
+                      end={{ x: 1, y: 0.5 }}
+                      style={styles.shimmerGradient}
+                    />
+                  </Animated.View>
+                </View>
+                <View style={styles.loadingYearBuilt}>
+                  <Animated.View style={[styles.shimmerOverlay, { transform: [{ translateX }] }]}>
+                    <LinearGradient
+                      colors={['transparent', 'rgba(255, 255, 255, 0.3)', 'transparent']}
+                      start={{ x: 0, y: 0.5 }}
+                      end={{ x: 1, y: 0.5 }}
+                      style={styles.shimmerGradient}
+                    />
+                  </Animated.View>
+                </View>
               </View>
             </View>
           </View>
@@ -548,7 +819,7 @@ const styles = StyleSheet.create({
     marginRight: 8
   },
   logoText: {
-    fontSize: 20,
+    fontSize: 24,
     fontWeight: 'bold',
     color: '#fc565b'
   },
@@ -700,8 +971,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     height: CARD_HEIGHT,
     width: width * 0.92,
-    marginTop: 30,
-    alignSelf: 'center',
+    alignSelf: 'center'
   },
   skeletonCard: {
     position: 'absolute',
@@ -714,7 +984,9 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.2,
     shadowRadius: 1.5,
     elevation: 2,
-    overflow: 'hidden'
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: '#ddd',
   },
   skeletonCardBottom: {
     transform: [
@@ -733,50 +1005,66 @@ const styles = StyleSheet.create({
   skeletonCardTop: {
     zIndex: 3
   },
-  skeletonImageContainer: {
-    height: CARD_HEIGHT * 0.82,
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 10,
-    borderTopRightRadius: 10,
+  imageGrid: {
+    width: '100%',
+    height: '100%',
+    flexDirection: 'column',
+    justifyContent: 'space-between'
+  },
+  cardImage: {
+    width: '100%',
+    height: '33.33%',
+    backgroundColor: '#E1E9EE',
+    marginBottom: 0,
     overflow: 'hidden',
+    position: 'relative'
   },
-  skeletonDetails: {
-    flex: 1,
-    padding: 15
-  },
-  skeletonPrice: {
-    height: 30,
-    width: '50%',
-    backgroundColor: '#f0f0f0',
+  loadingPrice: {
+    height: height * 0.035,
+    marginBottom: 1,
+    backgroundColor: '#E1E9EE',
     borderRadius: 4,
-    marginBottom: 15
+    overflow: 'hidden',
+    position: 'relative'
   },
-  skeletonDetailsRow: {
+  loadingDetailItem: {
     flexDirection: 'row',
-    justifyContent: 'flex-start',
     alignItems: 'center',
-    marginBottom: 15
-  },
-  skeletonDetailItem: {
-    width: 70,
+    marginRight: 12,
     height: 24,
-    backgroundColor: '#f0f0f0',
+    width: 70,
+    backgroundColor: '#E1E9EE',
     borderRadius: 4,
-    marginRight: 15
+    overflow: 'hidden',
+    position: 'relative'
   },
-  skeletonAddress: {
-    height: 18,
-    width: '85%',
-    backgroundColor: '#f0f0f0',
+  loadingAddress: {
+    height: height * 0.021,
+    marginTop: 4,
+    backgroundColor: '#E1E9EE',
     borderRadius: 4,
-    marginBottom: 8
+    overflow: 'hidden',
+    position: 'relative'
   },
-  skeletonYearBuilt: {
-    height: 18,
-    width: '40%',
-    backgroundColor: '#f0f0f0',
-    borderRadius: 4
+  loadingYearBuilt: {
+    height: height * 0.018,
+    marginTop: 4,
+    backgroundColor: '#E1E9EE',
+    borderRadius: 4,
+    overflow: 'hidden',
+    position: 'relative'
   },
+  shimmerOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    width: '100%',
+    height: '100%',
+  },
+  shimmerGradient: {
+    flex: 1,
+    width: '200%',
+  }
 });
 
 export default HotdeckViewScreen;
