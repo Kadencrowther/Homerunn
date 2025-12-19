@@ -14,6 +14,8 @@ import FindAnAgent from '../screens/FindAnAgent';
 import AgentDetailsScreen from '../screens/AgentDetailsScreen';
 import GetPrequalified from '../screens/GetPrequalified';
 import MyAgent from '../screens/myagent';
+import HotdeckListScreen from '../screens/HotdeckListScreen';
+import HotdeckViewScreen from '../screens/HotdeckViewScreen';
 
 const Tab = createBottomTabNavigator();
 const Stack = createStackNavigator();
@@ -130,6 +132,8 @@ const FlashStack = () => {
       <Stack.Screen name="AgentDetails" component={AgentDetailsScreen} />
       <Stack.Screen name="GetPrequalified" component={GetPrequalified} />
       <Stack.Screen name="MyAgent" component={MyAgent} />
+      <Stack.Screen name="HotdeckList" component={HotdeckListScreen} />
+      <Stack.Screen name="HotdeckView" component={HotdeckViewScreen} />
     </Stack.Navigator>
   );
 };

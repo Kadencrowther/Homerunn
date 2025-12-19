@@ -230,15 +230,13 @@ const MyAgent = ({ navigation }) => {
             </TouchableOpacity>
           )}
           
-          {agent.Website && (
-            <TouchableOpacity 
-              style={styles.quickActionButton}
-              onPress={handleWebsite}
-            >
-              <Ionicons name="globe" size={24} color="#fc565b" />
-              <Text style={styles.quickActionText}>Website</Text>
-            </TouchableOpacity>
-          )}
+          <TouchableOpacity 
+            style={styles.quickActionButton}
+            onPress={() => navigation.navigate('HotdeckList')}
+          >
+            <Ionicons name="albums" size={24} color="#fc565b" />
+            <Text style={styles.quickActionText}>Hotdecks</Text>
+          </TouchableOpacity>
         </View>
 
         {/* About Agent */}
@@ -454,14 +452,16 @@ const styles = StyleSheet.create({
   },
   quickActionsContainer: {
     flexDirection: 'row',
-    justifyContent: 'space-around',
+    justifyContent: 'space-evenly',
     paddingVertical: height * 0.025,
     borderBottomWidth: 1,
     borderBottomColor: '#f0f0f0',
   },
   quickActionButton: {
     alignItems: 'center',
+    justifyContent: 'center',
     padding: width * 0.03,
+    flex: 1,
   },
   quickActionText: {
     fontSize: width * 0.035,
