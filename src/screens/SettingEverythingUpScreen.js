@@ -43,11 +43,9 @@ const SettingEverythingUpScreen = ({ navigation, route }) => {
   const hasAgent = params.hasAgent || false;
   const agentName = params.agentName || null;
   
-  // Create PascalCase versions of all parameters for database consistency
-  // Only include Credentials if email and password exist (email/password sign up flow)
-  const Credentials = credentials?.email && credentials?.password ? {
-    Email: credentials.email,
-    Password: credentials.password
+  // Create PascalCase version for database ONLY (NEVER store passwords in Firestore!)
+  const CredentialsForDatabase = credentials?.email ? {
+    Email: credentials.email
   } : null;
   
   // Convert profile fields to PascalCase
@@ -83,9 +81,8 @@ const SettingEverythingUpScreen = ({ navigation, route }) => {
   
   // Log the data we received for debugging in a more detailed format using PascalCase
   console.log("SettingEverythingUpScreen detailed params check:", { 
-    HasCredentials: !!Credentials,
-    Email: Credentials?.Email || "Not provided (Apple Sign In or no email)",
-    HasPassword: !!Credentials?.Password,
+    HasCredentials: !!CredentialsForDatabase,
+    Email: CredentialsForDatabase?.Email || "Not provided (Apple Sign In or no email)",
     Profile: Profile,
     PreferencesCount: Preferences?.length || 0,
     Timeframe: Timeframe || "Not specified",
@@ -192,28 +189,42 @@ const SettingEverythingUpScreen = ({ navigation, route }) => {
 
   const createUserAccount = async () => {
     try {
-      console.log('Starting account creation with:', Credentials);
+      console.log('Starting account creation with:', { Email: credentials.email });
       
-      const { Email, Password } = Credentials;
+      const { email, password } = credentials;
       
-      if (!Email || !Password) {
-        console.error('Missing credentials:', { Email, Password });
+      if (!email || !password) {
+        console.error('Missing credentials:', { email, password });
         throw new Error('Missing email or password');
       }
 
       let userCredential;
       try {
-        userCredential = await createUserWithEmailAndPassword(auth, Email, Password);
+        userCredential = await createUserWithEmailAndPassword(auth, email, password);
         console.log('User account created successfully');
       } catch (error) {
         console.log('Error creating user, attempting to sign in:', error.message);
-        userCredential = await signInWithEmailAndPassword(auth, Email, Password);
+        userCredential = await signInWithEmailAndPassword(auth, email, password);
         console.log('Authentication successful');
       }
 
       if (!userCredential || !userCredential.user) {
         throw new Error('Failed to obtain user credentials after auth');
       }
+      
+      // CRITICAL: Create minimal Firestore document IMMEDIATELY after auth
+      // This prevents orphaned auth users with no Firestore document
+      console.log('Creating minimal user document immediately after auth...');
+      const userDocRef = doc(db, 'Users', userCredential.user.uid);
+      await setDoc(userDocRef, {
+        Credentials: { Email: email },
+        DateCreated: new Date().toISOString(),
+        UserId: userCredential.user.uid,
+        AuthId: userCredential.user.uid,
+        IsActive: true,
+        HasCompletedOnboarding: false
+      }, { merge: true });
+      console.log('Minimal user document created successfully');
       
       isAuthComplete.current = true;
       
@@ -249,7 +260,7 @@ const SettingEverythingUpScreen = ({ navigation, route }) => {
       // Create user data object with all fields in PascalCase
       // Only include Credentials if they exist (email/password flow)
       const userData = {
-        ...(Credentials && { Credentials }), // Only add if not null
+        ...(CredentialsForDatabase && { Credentials: CredentialsForDatabase }), // Only add if not null
         Profile,
         Preferences,
         Timeframe,
@@ -272,7 +283,7 @@ const SettingEverythingUpScreen = ({ navigation, route }) => {
       };
       
       console.log('User data prepared for database in PascalCase:', userData);
-      console.log('Credentials included:', !!Credentials);
+      console.log('Credentials included:', !!CredentialsForDatabase);
       console.log('Firebase Auth User ID saved to document:', currentUser.uid);
       
       try {

@@ -4,153 +4,157 @@ import {
   Text, 
   StyleSheet, 
   TouchableOpacity, 
-  ScrollView,
+  ScrollView, 
   Image, 
-  Linking, 
-  ActivityIndicator,
+  ActivityIndicator, 
+  Dimensions, 
   Alert,
-  Dimensions 
+  Linking 
 } from 'react-native';
 import { Ionicons, FontAwesome } from '@expo/vector-icons';
-import { auth } from '../config/firebase';
-import { getUserConnection, disconnectConnection } from '../services/agentUserConnectionService';
+import { auth, db } from '../config/firebase';
+import { doc, getDoc, collection, addDoc, serverTimestamp, query, where, getDocs } from 'firebase/firestore';
 import { getAgentUser } from '../services/AgentUserService';
 
-const { width, height} = Dimensions.get('window');
+const { width, height } = Dimensions.get('window');
 
-const MyAgent = ({ navigation }) => {
+const AgentDetailsScreen = ({ navigation, route }) => {
+  const { agent: initialAgent } = route.params;
+  const [agent, setAgent] = useState(initialAgent);
   const [loading, setLoading] = useState(true);
-  const [connection, setConnection] = useState(null);
-  const [agent, setAgent] = useState(null);
+  const [userData, setUserData] = useState(null);
+  const [requestSent, setRequestSent] = useState(false);
+  const [alreadyConnected, setAlreadyConnected] = useState(false);
 
   useEffect(() => {
-    fetchConnectedAgent();
+    fetchAgentDetails();
+    fetchUserData();
+    checkExistingConnection();
   }, []);
 
-  const fetchConnectedAgent = async () => {
+  const fetchAgentDetails = async () => {
     try {
       setLoading(true);
-      const userId = auth.currentUser?.uid;
-      console.log('🔍 MyAgent - User ID:', userId);
-      
-      if (!userId) {
-        console.log('❌ MyAgent - No user is signed in');
-        setLoading(false);
-        return;
-      }
-
-      // Get the connection
-      console.log('🔄 MyAgent - Fetching user connection...');
-      const userConnection = await getUserConnection(userId);
-      console.log('📊 MyAgent - Connection data:', userConnection);
-      
-      if (userConnection && userConnection.Status === 'Accepted') {
-        console.log('✅ MyAgent - Connection accepted, AgentId:', userConnection.AgentId);
-        setConnection(userConnection);
-        
-        // Fetch full agent details from AgentUsers collection
-        console.log('🔄 MyAgent - Fetching agent details from AgentUsers...');
-        const agentData = await getAgentUser(userConnection.AgentId);
-        console.log('👤 MyAgent - Agent data:', agentData);
-        
-        if (agentData) {
-          console.log('✅ MyAgent - Agent data loaded successfully');
-          setAgent(agentData);
-        } else {
-          console.log('❌ MyAgent - No agent data found for ID:', userConnection.AgentId);
-        }
-      } else {
-        // No accepted connection
-        console.log('⚠️ MyAgent - No accepted connection. Status:', userConnection?.Status);
+      const agentData = await getAgentUser(initialAgent.id);
+      if (agentData) {
+        setAgent({ ...initialAgent, ...agentData });
       }
     } catch (error) {
-      console.error('❌ MyAgent - Error fetching connected agent:', error);
+      console.error('Error fetching agent details:', error);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleCall = () => {
-    if (agent && agent.Phone) {
+  const fetchUserData = async () => {
+    try {
+      const userId = auth.currentUser?.uid;
+      if (!userId) return;
+
+      const userDocRef = doc(db, 'Users', userId);
+      const userDoc = await getDoc(userDocRef);
+
+      if (userDoc.exists()) {
+        setUserData(userDoc.data());
+      }
+    } catch (error) {
+      console.error('Error fetching user data:', error);
+    }
+  };
+
+  const checkExistingConnection = async () => {
+    try {
+      const userId = auth.currentUser?.uid;
+      if (!userId) return;
+
+      const connectionsQuery = query(
+        collection(db, 'AgentConnections'),
+        where('UserId', '==', userId),
+        where('AgentId', '==', initialAgent.id)
+      );
+      
+      const connectionsSnapshot = await getDocs(connectionsQuery);
+      
+      if (!connectionsSnapshot.empty) {
+        setAlreadyConnected(true);
+        setRequestSent(true);
+      }
+    } catch (error) {
+      console.error('Error checking connection:', error);
+    }
+  };
+
+  const handleConnectAgent = async () => {
+    try {
+      setRequestSent(true);
+      
+      const connectionData = {
+        UserId: auth.currentUser.uid,
+        AgentId: agent.id,
+        AgentName: `${agent.FirstName} ${agent.LastName}`,
+        UserName: `${userData?.Profile?.FirstName || ''} ${userData?.Profile?.LastName || ''}`.trim(),
+        Status: 'Requested',
+        CreatedAt: serverTimestamp(),
+        UserContact: {
+          Name: `${userData?.Profile?.FirstName || ''} ${userData?.Profile?.LastName || ''}`.trim(),
+          Email: userData?.Email || auth.currentUser.email,
+          Phone: userData?.Profile?.PhoneNumber || ''
+        },
+        AgentContact: {
+          Name: `${agent.FirstName} ${agent.LastName}`,
+          Email: agent.Email || '',
+          Phone: agent.Phone || ''
+        },
+        RequestType: 'AgentConnection',
+        Notes: `User requested to connect with agent`,
+        TextSent: false,
+        EmailSent: false,
+        LastNotificationSent: null
+      };
+      
+      await addDoc(collection(db, 'AgentConnections'), connectionData);
+      
+      Alert.alert(
+        'Request Sent!',
+        `Your connection request has been sent to ${agent.FirstName} ${agent.LastName}. They will contact you shortly.`,
+        [
+          {
+            text: 'Done',
+            onPress: () => navigation.goBack()
+          }
+        ]
+      );
+      
+    } catch (error) {
+      console.error('Error connecting with agent:', error);
+      Alert.alert('Error', 'There was a problem connecting with this agent. Please try again.');
+      setRequestSent(false);
+    }
+  };
+
+  const handleCallAgent = () => {
+    if (agent.Phone) {
       Linking.openURL(`tel:${agent.Phone}`);
     }
   };
 
-  const handleEmail = () => {
-    if (agent && agent.Email) {
+  const handleEmailAgent = () => {
+    if (agent.Email) {
       Linking.openURL(`mailto:${agent.Email}`);
     }
   };
 
   const handleWebsite = () => {
-    if (agent && agent.Website) {
+    if (agent.Website) {
       Linking.openURL(agent.Website);
     }
   };
 
-  const handleDisconnect = () => {
-    Alert.alert(
-      'Disconnect Agent',
-      `Are you sure you want to disconnect from ${agent?.name}? You can always reconnect later.`,
-      [
-        {
-          text: 'Cancel',
-          style: 'cancel'
-        },
-        {
-          text: 'Disconnect',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              if (connection) {
-                await disconnectConnection(connection.id);
-                Alert.alert('Success', 'You have been disconnected from your agent.');
-                navigation.goBack();
-              }
-            } catch (error) {
-              console.error('Error disconnecting:', error);
-              Alert.alert('Error', 'Failed to disconnect. Please try again.');
-            }
-          }
-        }
-      ]
-    );
-  };
-
   if (loading) {
     return (
-      <View style={styles.container}>
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#fc565b" />
-          <Text style={styles.loadingText}>Loading agent information...</Text>
-        </View>
-      </View>
-    );
-  }
-
-  if (!agent || !connection) {
-    return (
-      <View style={styles.container}>
-        <TouchableOpacity 
-          style={styles.backButton}
-          onPress={() => navigation.goBack()}
-        >
-          <Ionicons name="arrow-back" size={24} color="#000" />
-        </TouchableOpacity>
-
-        <View style={styles.noAgentContainer}>
-          <Ionicons name="person-outline" size={80} color="#ccc" />
-          <Text style={styles.noAgentTitle}>No Agent Connected</Text>
-          <Text style={styles.noAgentText}>
-            You don't have a connected agent yet. Find an agent to help you with your home search!
-          </Text>
-          <TouchableOpacity 
-            style={styles.findAgentButton}
-            onPress={() => navigation.navigate('FindAnAgent')}
-          >
-            <Text style={styles.findAgentButtonText}>Find an Agent</Text>
-          </TouchableOpacity>
-        </View>
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#fc565b" />
+        <Text style={styles.loadingText}>Loading agent details...</Text>
       </View>
     );
   }
@@ -188,24 +192,27 @@ const MyAgent = ({ navigation }) => {
                 </Text>
               </View>
             )}
-            <View style={styles.connectedBadge}>
-              <Ionicons name="checkmark-circle" size={24} color="#4CAF50" />
-            </View>
+            {agent.isCertified && (
+              <View style={styles.certifiedBadge}>
+                <FontAwesome name="shield" size={16} color="#fff" />
+              </View>
+            )}
           </View>
           
           <Text style={styles.agentName}>
             {agent.FirstName} {agent.LastName}
           </Text>
-          <Text style={styles.agentTitle}>
-            {agent.Company || 'Your Connected Agent'}
-          </Text>
           
-          <View style={styles.connectionStatus}>
-            <Ionicons name="checkmark-circle" size={16} color="#4CAF50" />
-            <Text style={styles.connectionStatusText}>
-              Connected since {new Date(connection.ConnectionActivatedAt).toLocaleDateString()}
-            </Text>
-          </View>
+          <Text style={styles.agentCompany}>
+            {agent.Company || (agent.isCertified ? 'Homerunn Intelligent Agent' : 'Real Estate Agent')}
+          </Text>
+
+          {agent.isCertified && (
+            <View style={styles.certifiedLabel}>
+              <FontAwesome name="shield" size={14} color="#fc565b" />
+              <Text style={styles.certifiedLabelText}>Homerunn Certified</Text>
+            </View>
+          )}
         </View>
 
         {/* Quick Actions */}
@@ -213,9 +220,9 @@ const MyAgent = ({ navigation }) => {
           {agent.Phone && (
             <TouchableOpacity 
               style={styles.quickActionButton}
-              onPress={handleCall}
+              onPress={handleCallAgent}
             >
-              <Ionicons name="call" size={24} color="#fc565b" />
+              <Ionicons name="call" size={20} color="#fc565b" />
               <Text style={styles.quickActionText}>Call</Text>
             </TouchableOpacity>
           )}
@@ -223,9 +230,9 @@ const MyAgent = ({ navigation }) => {
           {agent.Email && (
             <TouchableOpacity 
               style={styles.quickActionButton}
-              onPress={handleEmail}
+              onPress={handleEmailAgent}
             >
-              <Ionicons name="mail" size={24} color="#fc565b" />
+              <Ionicons name="mail" size={20} color="#fc565b" />
               <Text style={styles.quickActionText}>Email</Text>
             </TouchableOpacity>
           )}
@@ -235,21 +242,21 @@ const MyAgent = ({ navigation }) => {
               style={styles.quickActionButton}
               onPress={handleWebsite}
             >
-              <Ionicons name="globe" size={24} color="#fc565b" />
+              <Ionicons name="globe" size={20} color="#fc565b" />
               <Text style={styles.quickActionText}>Website</Text>
             </TouchableOpacity>
           )}
         </View>
 
-        {/* About Agent */}
+        {/* About Section */}
         {agent.Bio && (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>About</Text>
-            <Text style={styles.aboutText}>{agent.Bio}</Text>
+            <Text style={styles.bioText}>{agent.Bio}</Text>
           </View>
         )}
 
-        {/* Professional Details */}
+        {/* Experience & Details */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Professional Details</Text>
           
@@ -312,13 +319,6 @@ const MyAgent = ({ navigation }) => {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Contact Information</Text>
           
-          {agent.Email && (
-            <View style={styles.contactRow}>
-              <Ionicons name="mail-outline" size={20} color="#666" />
-              <Text style={styles.contactText}>{agent.Email}</Text>
-            </View>
-          )}
-          
           {agent.Phone && (
             <View style={styles.contactRow}>
               <Ionicons name="call-outline" size={20} color="#666" />
@@ -326,23 +326,27 @@ const MyAgent = ({ navigation }) => {
             </View>
           )}
           
-          {agent.State && (
+          {agent.Email && (
             <View style={styles.contactRow}>
-              <Ionicons name="location-outline" size={20} color="#666" />
-              <Text style={styles.contactText}>Licensed in {agent.State}</Text>
+              <Ionicons name="mail-outline" size={20} color="#666" />
+              <Text style={styles.contactText}>{agent.Email}</Text>
             </View>
           )}
         </View>
-
-        {/* Disconnect Button */}
-        <TouchableOpacity 
-          style={styles.disconnectButton}
-          onPress={handleDisconnect}
-        >
-          <Ionicons name="unlink-outline" size={20} color="#ff3b30" />
-          <Text style={styles.disconnectButtonText}>Disconnect Agent</Text>
-        </TouchableOpacity>
       </ScrollView>
+
+      {/* Fixed Bottom Button */}
+      <View style={styles.bottomButtonContainer}>
+        <TouchableOpacity 
+          style={[styles.connectButton, (requestSent || alreadyConnected) && styles.connectButtonDisabled]}
+          onPress={handleConnectAgent}
+          disabled={requestSent || alreadyConnected}
+        >
+          <Text style={styles.connectButtonText}>
+            {alreadyConnected || requestSent ? 'Invite Sent' : 'Connect with Agent'}
+          </Text>
+        </TouchableOpacity>
+      </View>
     </View>
   );
 };
@@ -364,9 +368,10 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: '#fff',
   },
   loadingText: {
-    marginTop: height * 0.02,
+    marginTop: height * 0.01,
     fontSize: width * 0.04,
     color: '#666',
   },
@@ -374,11 +379,11 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   scrollContent: {
-    paddingBottom: height * 0.05,
+    paddingBottom: height * 0.12,
   },
   profileSection: {
     alignItems: 'center',
-    paddingVertical: height * 0.03,
+    paddingVertical: height * 0.02,
     borderBottomWidth: 1,
     borderBottomColor: '#f0f0f0',
   },
@@ -391,40 +396,35 @@ const styles = StyleSheet.create({
     height: width * 0.25,
     borderRadius: width * 0.125,
     borderWidth: 3,
-    borderColor: '#fff',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    borderColor: '#f0f0f0',
   },
   profileImagePlaceholder: {
     width: width * 0.25,
     height: width * 0.25,
     borderRadius: width * 0.125,
-    backgroundColor: '#fc565b',
+    backgroundColor: '#f0f0f0',
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 3,
-    borderColor: '#fff',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    borderColor: '#f0f0f0',
   },
   profileInitials: {
     fontSize: width * 0.08,
     fontWeight: 'bold',
-    color: '#fff',
+    color: '#999',
   },
-  connectedBadge: {
+  certifiedBadge: {
     position: 'absolute',
     bottom: 0,
     right: 0,
-    backgroundColor: '#fff',
-    borderRadius: width * 0.05,
-    padding: width * 0.01,
+    backgroundColor: '#fc565b',
+    width: width * 0.08,
+    height: width * 0.08,
+    borderRadius: width * 0.04,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 3,
+    borderColor: '#fff',
   },
   agentName: {
     fontSize: width * 0.06,
@@ -432,25 +432,25 @@ const styles = StyleSheet.create({
     color: '#333',
     marginBottom: height * 0.005,
   },
-  agentTitle: {
+  agentCompany: {
     fontSize: width * 0.04,
     color: '#666',
     marginBottom: height * 0.01,
   },
-  connectionStatus: {
+  certifiedLabel: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(76, 175, 80, 0.1)',
+    backgroundColor: 'rgba(252, 86, 91, 0.1)',
     paddingHorizontal: width * 0.04,
     paddingVertical: height * 0.008,
     borderRadius: width * 0.04,
     marginTop: height * 0.01,
   },
-  connectionStatusText: {
-    fontSize: width * 0.033,
-    color: '#4CAF50',
+  certifiedLabelText: {
+    fontSize: width * 0.035,
     fontWeight: '600',
-    marginLeft: width * 0.015,
+    color: '#fc565b',
+    marginLeft: width * 0.02,
   },
   quickActionsContainer: {
     flexDirection: 'row',
@@ -481,17 +481,7 @@ const styles = StyleSheet.create({
     color: '#333',
     marginBottom: height * 0.015,
   },
-  contactRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: height * 0.015,
-  },
-  contactText: {
-    fontSize: width * 0.04,
-    color: '#666',
-    marginLeft: width * 0.03,
-  },
-  aboutText: {
+  bioText: {
     fontSize: width * 0.04,
     color: '#666',
     lineHeight: width * 0.06,
@@ -533,54 +523,47 @@ const styles = StyleSheet.create({
     color: '#333',
     fontWeight: '500',
   },
-  disconnectButton: {
+  contactRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    marginHorizontal: width * 0.05,
-    marginTop: height * 0.03,
-    paddingVertical: height * 0.015,
-    borderWidth: 1,
-    borderColor: '#ff3b30',
-    borderRadius: width * 0.02,
+    marginBottom: height * 0.015,
   },
-  disconnectButtonText: {
-    fontSize: width * 0.04,
-    color: '#ff3b30',
-    fontWeight: '600',
-    marginLeft: width * 0.02,
-  },
-  noAgentContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: width * 0.1,
-  },
-  noAgentTitle: {
-    fontSize: width * 0.055,
-    fontWeight: 'bold',
-    color: '#333',
-    marginTop: height * 0.02,
-    marginBottom: height * 0.01,
-  },
-  noAgentText: {
+  contactText: {
     fontSize: width * 0.04,
     color: '#666',
-    textAlign: 'center',
-    lineHeight: width * 0.06,
-    marginBottom: height * 0.03,
+    marginLeft: width * 0.03,
   },
-  findAgentButton: {
+  bottomButtonContainer: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: '#fff',
+    paddingHorizontal: width * 0.05,
+    paddingVertical: height * 0.02,
+    borderTopWidth: 1,
+    borderTopColor: '#f0f0f0',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  connectButton: {
     backgroundColor: '#fc565b',
-    paddingVertical: height * 0.018,
-    paddingHorizontal: width * 0.08,
-    borderRadius: width * 0.02,
+    paddingVertical: height * 0.02,
+    borderRadius: width * 0.03,
+    alignItems: 'center',
   },
-  findAgentButtonText: {
+  connectButtonDisabled: {
+    backgroundColor: '#4CAF50',
+  },
+  connectButtonText: {
     color: '#fff',
+    fontSize: width * 0.045,
     fontWeight: 'bold',
-    fontSize: width * 0.04,
   },
 });
 
-export default MyAgent;
+export default AgentDetailsScreen;
+

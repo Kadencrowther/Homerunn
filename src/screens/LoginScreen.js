@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, Dimensions, Modal } from 'react-native';
 import { signInWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth';
 import { auth, db } from '../config/firebase';
-import { doc, getDoc, updateDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { Ionicons } from '@expo/vector-icons';
 
 const { width, height } = Dimensions.get('window');
@@ -18,13 +18,27 @@ const LoginScreen = ({ navigation }) => {
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
       
       // Set IsActive to true when user logs in
+      // Use setDoc with merge to create document if it doesn't exist (handles orphaned auth users)
       const userDocRef = doc(db, 'Users', userCredential.user.uid);
-      await updateDoc(userDocRef, {
-        IsActive: true
-      });
+      await setDoc(userDocRef, {
+        IsActive: true,
+        Credentials: { Email: email },
+        DateCreated: new Date().toISOString(),
+        UserId: userCredential.user.uid,
+        AuthId: userCredential.user.uid
+      }, { merge: true });
       
-      // Navigate to UserInfo
-      navigation.replace('UserInfo');
+      // Check if user has completed onboarding
+      const userDoc = await getDoc(userDocRef);
+      const userData = userDoc.data();
+      
+      if (userData?.HasCompletedOnboarding) {
+        // User has completed onboarding, go to main app
+        navigation.replace('App');
+      } else {
+        // User hasn't completed onboarding, continue the flow
+        navigation.replace('UserInfo');
+      }
     } catch (error) {
       let errorMessage = 'Invalid email or password';
       if (error.code === 'auth/user-not-found') {

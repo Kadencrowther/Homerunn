@@ -3,6 +3,8 @@ import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Image, ActivityIn
 import { Ionicons, FontAwesome } from '@expo/vector-icons';
 import { auth, db } from '../config/firebase';
 import { doc, getDoc, collection, query, where, getDocs, addDoc, serverTimestamp } from 'firebase/firestore';
+import AgentSearch from '../components/AgentSearch';
+import InviteAgentModal from '../components/InviteAgentModal';
 
 const { width, height } = Dimensions.get('window');
 
@@ -14,11 +16,35 @@ const FindAnAgent = ({ navigation }) => {
   const [loadingAgents, setLoadingAgents] = useState(false);
   const [selectedAgent, setSelectedAgent] = useState(null);
   const [requestSent, setRequestSent] = useState(false);
+  const [connectedAgentIds, setConnectedAgentIds] = useState([]);
+  const [inviteModalVisible, setInviteModalVisible] = useState(false);
 
-  // Fetch user data to get zip code
+  // Fetch user data and connections
   useEffect(() => {
     fetchUserData();
+    fetchExistingConnections();
   }, []);
+
+  // Fetch existing agent connections
+  const fetchExistingConnections = async () => {
+    try {
+      const userId = auth.currentUser?.uid;
+      if (!userId) return;
+
+      const connectionsQuery = query(
+        collection(db, 'AgentConnections'),
+        where('UserId', '==', userId)
+      );
+      
+      const connectionsSnapshot = await getDocs(connectionsQuery);
+      const agentIds = connectionsSnapshot.docs.map(doc => doc.data().AgentId);
+      
+      setConnectedAgentIds(agentIds);
+      console.log('Found existing connections:', agentIds);
+    } catch (error) {
+      console.error('Error fetching connections:', error);
+    }
+  };
 
   const fetchUserData = async () => {
     try {
@@ -235,6 +261,9 @@ const FindAnAgent = ({ navigation }) => {
       // Add the document to Firestore
       await addDoc(collection(db, 'AgentConnections'), connectionData);
       
+      // Update connected agents list
+      setConnectedAgentIds([...connectedAgentIds, agent.id]);
+      
       console.log('Agent connection request sent to:', agent.id);
       
     } catch (error) {
@@ -242,6 +271,15 @@ const FindAnAgent = ({ navigation }) => {
       Alert.alert('Error', 'There was a problem connecting with this agent. Please try again.');
       setRequestSent(false);
     }
+  };
+
+  const isAgentConnected = (agentId) => {
+    return connectedAgentIds.includes(agentId);
+  };
+
+  const handleInviteSuccess = () => {
+    // Refresh connections after invite
+    fetchExistingConnections();
   };
 
   return (
@@ -323,9 +361,16 @@ const FindAnAgent = ({ navigation }) => {
             </View>
           </View>
           
+          {/* Agent Search Component */}
+          <AgentSearch 
+            navigation={navigation} 
+            connectedAgentIds={connectedAgentIds}
+            onInviteAgent={() => setInviteModalVisible(true)}
+          />
+          
           <View style={styles.agentSection}>
             <Text style={styles.agentSectionTitle}>
-              Agents Available in Your Area
+              Recommended Agents in Your Area
             </Text>
             
             {loadingAgents ? (
@@ -359,7 +404,7 @@ const FindAnAgent = ({ navigation }) => {
                   <TouchableOpacity 
                     key={agent.id} 
                     style={styles.agentCard}
-                    onPress={() => handleAgentSelect(agent)}
+                    onPress={() => navigation.navigate('AgentDetails', { agent })}
                   >
                     <View style={styles.agentImageContainer}>
                       {agent.ProfileImage ? (
@@ -388,7 +433,14 @@ const FindAnAgent = ({ navigation }) => {
                         <Text style={styles.agentContact}>{agent.Phone}</Text>
                       )}
                     </View>
-                    <Ionicons name="chevron-forward" size={24} color="#ccc" />
+                    {isAgentConnected(agent.id) ? (
+                      <View style={styles.connectedBadge}>
+                        <Ionicons name="checkmark-circle" size={18} color="#4CAF50" />
+                        <Text style={styles.connectedText}>Invite Sent</Text>
+                      </View>
+                    ) : (
+                      <Ionicons name="chevron-forward" size={24} color="#ccc" />
+                    )}
                   </TouchableOpacity>
                 ))}
               </>
@@ -404,6 +456,13 @@ const FindAnAgent = ({ navigation }) => {
           </View>
         </ScrollView>
       )}
+      
+      {/* Invite Agent Modal */}
+      <InviteAgentModal
+        visible={inviteModalVisible}
+        onClose={() => setInviteModalVisible(false)}
+        onSuccess={handleInviteSuccess}
+      />
     </View>
   );
 };
@@ -649,6 +708,20 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: width * 0.04,
     fontWeight: 'bold',
+  },
+  connectedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(76, 175, 80, 0.1)',
+    paddingHorizontal: width * 0.025,
+    paddingVertical: height * 0.008,
+    borderRadius: width * 0.03,
+  },
+  connectedText: {
+    fontSize: width * 0.033,
+    color: '#4CAF50',
+    fontWeight: '600',
+    marginLeft: width * 0.015,
   },
 });
 

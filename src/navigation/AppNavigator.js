@@ -11,6 +11,7 @@ import PropertyImages from '../screens/PropertyImages';
 import PropertyDetails from '../screens/PropertyDetails';
 import GetListingOffer from '../screens/GetListingOffer';
 import FindAnAgent from '../screens/FindAnAgent';
+import AgentDetailsScreen from '../screens/AgentDetailsScreen';
 import GetPrequalified from '../screens/GetPrequalified';
 import MyAgent from '../screens/myagent';
 
@@ -126,6 +127,7 @@ const FlashStack = () => {
       <Stack.Screen name="FlashMain" component={FlashScreen} />
       <Stack.Screen name="GetListingOffer" component={GetListingOffer} />
       <Stack.Screen name="FindAnAgent" component={FindAnAgent} />
+      <Stack.Screen name="AgentDetails" component={AgentDetailsScreen} />
       <Stack.Screen name="GetPrequalified" component={GetPrequalified} />
       <Stack.Screen name="MyAgent" component={MyAgent} />
     </Stack.Navigator>

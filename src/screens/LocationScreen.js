@@ -278,15 +278,32 @@ const LocationScreen = ({ navigation, route }) => {
   };
 
   const handleSkip = () => {
+    // Default to Jackson, MS if user skips location selection
+    const defaultCoordinates = {
+      latitude: 32.2988,
+      longitude: -90.1848
+    };
+    
+    const defaultDelta = calculateZoomForRadius(DEFAULT_RADIUS);
+    const defaultMapRegion = {
+      latitude: 32.2988,
+      longitude: -90.1848,
+      latitudeDelta: defaultDelta,
+      longitudeDelta: defaultDelta * (width / height),
+    };
+    
     const params = {
       credentials,
       preferences,
       timeframe,
       hasAgent,
       agentName,
-      location: null,
-      state: null,
-      city: null
+      location: 'Jackson, Mississippi',
+      state: 'MS',
+      city: 'Jackson',
+      radiusMiles: DEFAULT_RADIUS,
+      coordinates: defaultCoordinates,
+      mapRegion: defaultMapRegion
     };
     
     navigation.navigate('ReviewScreen', params);

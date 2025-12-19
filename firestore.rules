@@ -2,6 +2,20 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
+    
+    // ========== ZIPCODES COLLECTION ==========
+    // Allow public read access to check zipcode availability during registration
+    match /Zipcodes/{zipcodeId} {
+      // Allow anyone to read zipcode data (for availability checking)
+      allow read: if true;
+      
+      // Only authenticated users can create/update zipcodes
+      allow create, update: if request.auth != null;
+      
+      // Only allow deletion by authenticated users
+      allow delete: if request.auth != null;
+    }
+    
     // Allow users to create their own document during registration
     match /AgentUsers/{userId} {
       // Allow create if the user is authenticated and the userId matches their auth ID
@@ -13,9 +27,41 @@ service cloud.firestore {
       // Allow update if the user is authenticated and the document belongs to them
       allow update: if request.auth != null && request.auth.uid == userId;
       
-      // Allow access to subcollections
+      // Allow access to Pipelines subcollection and all nested stage collections
       match /Pipelines/{pipelineId} {
         allow read, write: if request.auth != null && request.auth.uid == userId;
+        
+        // Allow access to all stage subcollections (New, Contacted, Qualified, etc.)
+        match /{stageName}/{contactId} {
+          allow read, write: if request.auth != null && request.auth.uid == userId;
+        }
+      }
+      
+      // Allow access to Leads subcollection
+      match /Leads/{leadId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+      
+      // Allow access to HotDecks subcollection
+      match /HotDecks/{hotDeckId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+      
+      // Allow access to Deals subcollection - FULL CRUD access
+      match /Deals/{dealId} {
+        // Allow create with proper validation
+        allow create: if request.auth != null && 
+                      request.auth.uid == userId &&
+                      request.resource.data.keys().hasAll(['FirstName', 'LastName']);
+        
+        // Allow read access
+        allow read: if request.auth != null && request.auth.uid == userId;
+        
+        // Allow update with proper validation
+        allow update: if request.auth != null && request.auth.uid == userId;
+        
+        // Allow delete
+        allow delete: if request.auth != null && request.auth.uid == userId;
       }
     }
     
@@ -116,7 +162,7 @@ service cloud.firestore {
 
     // Allow public write access to Waitlist collection (PascalCase)
     match /Waitlist/{document=**} {
-      // Allow anyone to create waitlist entries
+      // Allow anyone to create waitlist entries (including zipcode waitlist)
       allow create: if 
         // Require all necessary fields
         request.resource.data.keys().hasAll(['FirstName', 'Email', 'Phone', 'Type', 'Timestamp', 'Source']) &&
@@ -124,11 +170,15 @@ service cloud.firestore {
         request.resource.data.Email.matches('^[^@]+@[^@]+\\.[^@]+$') &&
         // Validate phone number (basic validation)
         request.resource.data.Phone.size() >= 10 &&
-        // Validate type is waitlist
-        request.resource.data.Type == 'waitlist';
+        // Validate type is waitlist or zipcode_waitlist
+        (request.resource.data.Type == 'waitlist' || request.resource.data.Type == 'zipcode_waitlist');
 
       // Only allow read access to authenticated users
       allow read: if request.auth != null;
+      
+      // Allow authenticated users to update/delete their own waitlist entries
+      allow update, delete: if request.auth != null && 
+                             resource.data.Email == request.auth.token.email;
     }
 
     // Add or modify rules to allow access to UserMatchMetric subcollection
@@ -249,6 +299,44 @@ service cloud.firestore {
       allow update: if request.auth != null && 
                     (resource.data.UserId == request.auth.uid || 
                      resource.data.UserEmail == request.auth.token.email);
+    }
+
+    // Add rules for PendingAgentInvites collection
+    match /PendingAgentInvites/{inviteId} {
+      // Allow authenticated users to create agent invites
+      allow create: if request.auth != null &&
+                    request.resource.data.InvitingUserId == request.auth.uid;
+      
+      // Allow users to read their own invites
+      allow read: if request.auth != null && 
+                  resource.data.InvitingUserId == request.auth.uid;
+      
+      // Allow users to update their own invites (for resending, etc.)
+      allow update: if request.auth != null && 
+                    resource.data.InvitingUserId == request.auth.uid;
+      
+      // Allow deletion by the user who created the invite
+      allow delete: if request.auth != null && 
+                    resource.data.InvitingUserId == request.auth.uid;
+    }
+
+    // Add rules for PendingUserInvites collection (for agents inviting users)
+    match /PendingUserInvites/{inviteId} {
+      // Allow authenticated agents to create user invites
+      allow create: if request.auth != null &&
+                    request.resource.data.InvitingAgentId == request.auth.uid;
+      
+      // Allow agents to read their own invites
+      allow read: if request.auth != null && 
+                  resource.data.InvitingAgentId == request.auth.uid;
+      
+      // Allow agents to update their own invites
+      allow update: if request.auth != null && 
+                    resource.data.InvitingAgentId == request.auth.uid;
+      
+      // Allow deletion by the agent who created the invite
+      allow delete: if request.auth != null && 
+                    resource.data.InvitingAgentId == request.auth.uid;
     }
   }
 }

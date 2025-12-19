@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Dimensions, Platform, Linking, Image } from 'react-native';
+import React, { useState, useEffect, useRef } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Dimensions, Platform, Linking, Image, Animated } from 'react-native';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import MapView, { PROVIDER_GOOGLE, Marker, Callout } from 'react-native-maps';
@@ -7,6 +7,7 @@ import * as Location from 'expo-location';
 import { auth, db } from '../config/firebase';
 import { doc, getDoc } from 'firebase/firestore';
 import { useAuth } from '../context/AuthContext';
+import { getUserConnection, getAgentById } from '../services/agentUserConnectionService';
 
 const { width, height } = Dimensions.get('window');
 
@@ -25,6 +26,33 @@ const FlashScreen = () => {
   const [address, setAddress] = useState('');
   const [mapRegion, setMapRegion] = useState(null);
   const [hasAgent, setHasAgent] = useState(false);
+  const [connectedAgent, setConnectedAgent] = useState(null);
+  const [loadingAgent, setLoadingAgent] = useState(false);
+  
+  // Skeleton loading animation
+  const pulseAnim = useRef(new Animated.Value(0)).current;
+
+  // Start pulse animation when loading
+  useEffect(() => {
+    if (loadingAgent) {
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(pulseAnim, {
+            toValue: 1,
+            duration: 1000,
+            useNativeDriver: true,
+          }),
+          Animated.timing(pulseAnim, {
+            toValue: 0,
+            duration: 1000,
+            useNativeDriver: true,
+          }),
+        ])
+      ).start();
+    } else {
+      pulseAnim.setValue(0);
+    }
+  }, [loadingAgent]);
 
   // Fetch user data from Firestore
   const fetchUserData = async () => {
@@ -46,13 +74,6 @@ const FlashScreen = () => {
         setUserData(data);
         console.log('User data retrieved for FlashScreen:', data);
         
-        // Check if user has an agent
-        if (data.HasAgent === "Yes") {
-          setHasAgent(true);
-        } else {
-          setHasAgent(false);
-        }
-        
         // Get address from Profile if it exists
         if (data.Profile && data.Profile.Address) {
           setAddress(data.Profile.Address);
@@ -62,6 +83,9 @@ const FlashScreen = () => {
           setAddress('');
           setMapRegion(null);
         }
+        
+        // Check for connected agent using AgentUserConnectionService
+        await checkConnectedAgent(userId);
       } else {
         console.log('No user document found for this user in FlashScreen');
       }
@@ -69,6 +93,37 @@ const FlashScreen = () => {
       console.error('Error fetching user data in FlashScreen:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Check if user has a connected agent
+  const checkConnectedAgent = async (userId) => {
+    try {
+      setLoadingAgent(true);
+      const connection = await getUserConnection(userId);
+      
+      if (connection && connection.Status === 'Accepted') {
+        // User has an accepted connection
+        setHasAgent(true);
+        
+        // Fetch agent details
+        const agent = await getAgentById(connection.AgentId);
+        if (agent) {
+          setConnectedAgent({
+            ...agent,
+            connectionId: connection.id
+          });
+        }
+      } else {
+        setHasAgent(false);
+        setConnectedAgent(null);
+      }
+    } catch (error) {
+      console.error('Error checking connected agent:', error);
+      setHasAgent(false);
+      setConnectedAgent(null);
+    } finally {
+      setLoadingAgent(false);
     }
   };
 
@@ -215,15 +270,87 @@ const FlashScreen = () => {
       {/* Agent Card */}
       <View style={styles.card}>
         <Text style={styles.cardTitle}>Your Agent</Text>
-        <Text style={styles.cardText}>Connect with a market friendly real estate agent to guide you through the process of finding your dream home!</Text>
-        <TouchableOpacity 
-          style={styles.button} 
-          onPress={() => navigation.navigate(hasAgent ? 'MyAgent' : 'FindAnAgent')}
-        >
-          <Text style={styles.buttonText}>
-            {hasAgent ? 'My Agent' : 'Find an Agent near you'}
-          </Text>
-        </TouchableOpacity>
+        {loadingAgent ? (
+          <>
+            {/* Loading Skeleton */}
+            <Animated.View 
+              style={[
+                styles.agentInfoContainer,
+                {
+                  opacity: pulseAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [0.3, 1]
+                  })
+                }
+              ]}
+            >
+              <View style={[styles.agentAvatar, styles.skeletonBackground]} />
+              <View style={styles.agentDetails}>
+                <View style={[styles.skeletonLine, styles.skeletonName]} />
+                <View style={[styles.skeletonLine, styles.skeletonContact]} />
+                <View style={[styles.skeletonLine, styles.skeletonContact, { width: '60%' }]} />
+              </View>
+            </Animated.View>
+            <Animated.View 
+              style={[
+                styles.skeletonLine, 
+                { 
+                  width: '100%', 
+                  height: 40, 
+                  marginBottom: height * 0.02,
+                  opacity: pulseAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [0.3, 1]
+                  })
+                }
+              ]} 
+            />
+            <Animated.View 
+              style={[
+                styles.button, 
+                styles.skeletonBackground,
+                {
+                  opacity: pulseAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [0.3, 1]
+                  })
+                }
+              ]} 
+            />
+          </>
+        ) : connectedAgent ? (
+          <>
+            <View style={styles.agentInfoContainer}>
+              <View style={styles.agentAvatar}>
+                <Text style={styles.agentInitials}>
+                  {connectedAgent.name.split(' ').map(n => n[0]).join('')}
+                </Text>
+              </View>
+              <View style={styles.agentDetails}>
+                <Text style={styles.agentName}>{connectedAgent.name}</Text>
+                {connectedAgent.email && (
+                  <Text style={styles.agentContact}>{connectedAgent.email}</Text>
+                )}
+                {connectedAgent.phone && (
+                  <Text style={styles.agentContact}>{connectedAgent.phone}</Text>
+                )}
+              </View>
+            </View>
+            <Text style={styles.cardText}>Your connected real estate agent is here to guide you through the home buying process!</Text>
+          </>
+        ) : (
+          <Text style={styles.cardText}>Connect with a market friendly real estate agent to guide you through the process of finding your dream home!</Text>
+        )}
+        {!loadingAgent && (
+          <TouchableOpacity 
+            style={styles.button} 
+            onPress={() => navigation.navigate(hasAgent ? 'MyAgent' : 'FindAnAgent')}
+          >
+            <Text style={styles.buttonText}>
+              {hasAgent ? 'View My Agent' : 'Find an Agent near you'}
+            </Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       {/* Loan Team Card */}
@@ -347,6 +474,63 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: 'bold',
     fontSize: width * 0.04,
+  },
+  agentInfoContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: height * 0.015,
+    padding: width * 0.03,
+    backgroundColor: '#fff',
+    borderRadius: width * 0.02,
+    borderWidth: 1,
+    borderColor: '#f0f0f0',
+  },
+  agentAvatar: {
+    width: width * 0.12,
+    height: width * 0.12,
+    borderRadius: width * 0.06,
+    backgroundColor: '#fc565b',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: width * 0.03,
+  },
+  agentInitials: {
+    color: '#fff',
+    fontSize: width * 0.05,
+    fontWeight: 'bold',
+  },
+  agentDetails: {
+    flex: 1,
+  },
+  agentName: {
+    fontSize: width * 0.04,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: height * 0.003,
+  },
+  agentContact: {
+    fontSize: width * 0.033,
+    color: '#666',
+    marginBottom: height * 0.002,
+  },
+  // Loading Skeleton Styles
+  skeletonBackground: {
+    backgroundColor: '#e0e0e0',
+    overflow: 'hidden',
+  },
+  skeletonLine: {
+    height: 14,
+    backgroundColor: '#e0e0e0',
+    borderRadius: 4,
+    marginBottom: height * 0.008,
+  },
+  skeletonName: {
+    width: '70%',
+    height: 16,
+  },
+  skeletonContact: {
+    width: '85%',
+    height: 12,
   },
   customMarker: {
     width: 28,
