@@ -164,6 +164,97 @@ const SearchScreen = () => {
   // Add this state to track if the button has been pressed
   const [hasSearchedCurrentArea, setHasSearchedCurrentArea] = useState(false);
   const buttonColorAnim = useRef(new Animated.Value(0)).current;
+  const [hasInitialized, setHasInitialized] = useState(false);
+  
+  // Default location constants
+  const DEFAULT_LOCATION = {
+    latitude: 32.2988,
+    longitude: -90.1848,
+    name: 'Jackson, MS'
+  };
+  
+  // Initialize map location on mount - get user's current location or default to Jackson, MS
+  useEffect(() => {
+    const initializeLocation = async () => {
+      if (hasInitialized) return;
+      
+      try {
+        console.log('SearchScreen - Initializing location...');
+        
+        // Request location permissions
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        
+        let newRegion;
+        
+        if (status === 'granted') {
+          try {
+            console.log('SearchScreen - Location permission granted, getting current position...');
+            const location = await Location.getCurrentPositionAsync({
+              accuracy: Location.Accuracy.Balanced,
+            });
+            
+            console.log('SearchScreen - User location:', location.coords.latitude, location.coords.longitude);
+            
+            // Set region to user's current location
+            newRegion = {
+              latitude: location.coords.latitude,
+              longitude: location.coords.longitude,
+              latitudeDelta: 0.02,
+              longitudeDelta: 0.02,
+            };
+          } catch (error) {
+            console.log('SearchScreen - Error getting current position, using default:', error);
+            // If getting position fails, use default
+            newRegion = {
+              latitude: DEFAULT_LOCATION.latitude,
+              longitude: DEFAULT_LOCATION.longitude,
+              latitudeDelta: 0.02,
+              longitudeDelta: 0.02,
+            };
+          }
+        } else {
+          console.log('SearchScreen - Location permission denied, using default location:', DEFAULT_LOCATION.name);
+          // If permission denied, use Jackson, MS
+          newRegion = {
+            latitude: DEFAULT_LOCATION.latitude,
+            longitude: DEFAULT_LOCATION.longitude,
+            latitudeDelta: 0.02,
+            longitudeDelta: 0.02,
+          };
+        }
+        
+        // Update region state
+        setRegion(newRegion);
+        
+        // Animate map to the new region
+        if (mapRef.current) {
+          mapRef.current.animateToRegion(newRegion, 1000);
+        }
+        
+        setHasInitialized(true);
+      } catch (error) {
+        console.error('SearchScreen - Error initializing location:', error);
+        
+        // Fallback to default location
+        const newRegion = {
+          latitude: DEFAULT_LOCATION.latitude,
+          longitude: DEFAULT_LOCATION.longitude,
+          latitudeDelta: 0.02,
+          longitudeDelta: 0.02,
+        };
+        
+        setRegion(newRegion);
+        
+        if (mapRef.current) {
+          mapRef.current.animateToRegion(newRegion, 1000);
+        }
+        
+        setHasInitialized(true);
+      }
+    };
+    
+    initializeLocation();
+  }, []);
   
   // Apply guest mode filter on mount if user is guest
   useEffect(() => {
@@ -701,10 +792,12 @@ const SearchScreen = () => {
     return clusters;
   };
 
-  // Initial data load
+  // Fetch properties after location is initialized
   useEffect(() => {
-    fetchPropertiesForRegion(region);
-  }, []);
+    if (hasInitialized) {
+      fetchPropertiesForRegion(region);
+    }
+  }, [hasInitialized]);
 
   // Combine sample properties with MLS properties
   const allProperties = [...properties, ...mlsProperties];
